@@ -8,8 +8,11 @@ env:
     - SKIP_LATEX_BUILD=1
     - TOXENV=py37
 
+addons:
+  homebrew:
+    packages: imagemagick
+
 install:
-  - brew install imagemagick
   - pip install -U tox codecov
 
 script:
