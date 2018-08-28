@@ -10,7 +10,10 @@ env:
 
 addons:
   homebrew:
-    packages: imagemagick
+    packages:
+      - imagemagick
+      - python
+    update: true
 
 install:
   - pip install -U tox codecov
