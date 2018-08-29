@@ -10,7 +10,12 @@ env:
 
 addons:
   homebrew:
+    taps:
+      - heroku/brew
+      - homebrew/cask-versions
+    casks: java8
     packages:
+      - heroku
       - imagemagick
       - python
     update: true
