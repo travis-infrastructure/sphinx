@@ -18,6 +18,7 @@ addons:
       - heroku
       - imagemagick
       - python
+    brewfile: true
     update: true
 
 install:
