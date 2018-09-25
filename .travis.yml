@@ -9,6 +9,18 @@ env:
     - TOXENV=py37
 
 addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+      - sourceline: "ppa:beineri/opt-qt58-trusty"
+      - sourceline: "ppa:corentinjabot/cmake-backport" #cmake 3.7.2
+      # cmake 3.12 ppa:dluxen/cmake-backports
+    packages:
+      - gcc-5
+      - g++-5
+      - libglu1-mesa-dev
+      - qt58base
+      - cmake
   homebrew:
     taps:
       - heroku/brew
