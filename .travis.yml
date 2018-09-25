@@ -22,7 +22,7 @@ addons:
     update: true
 
 before_install:
-  - echo 'This is my before_install phase'
+  - echo 'this is my before_install phase'
 
 install:
   - pip install -U tox codecov
