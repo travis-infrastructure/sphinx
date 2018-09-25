@@ -21,6 +21,9 @@ addons:
     brewfile: true
     update: true
 
+before_install:
+  - echo 'This is my before_install phase'
+
 install:
   - pip install -U tox codecov
 
