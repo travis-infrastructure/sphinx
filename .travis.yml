@@ -7,6 +7,7 @@ env:
     - PYTHONFAULTHANDLER=x
     - SKIP_LATEX_BUILD=1
     - TOXENV=py37
+    - IS_PYTHON=true
 
 install:
   - brew install imagemagick
