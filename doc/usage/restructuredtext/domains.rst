@@ -541,17 +541,22 @@ The C++ Domain
 
 The C++ domain (name **cpp**) supports documenting C++ projects.
 
-Directives
-~~~~~~~~~~
+Directives for Declaring Entities
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The following directives are available. All declarations can start with a
 visibility statement (``public``, ``private`` or ``protected``).
 
 .. rst:directive:: .. cpp:class:: class specifier
+                   .. cpp:struct:: class specifier
 
    Describe a class/struct, possibly with specification of inheritance, e.g.,::
 
       .. cpp:class:: MyClass : public MyBase, MyOtherBase
+
+   The difference between :rst:dir:`cpp:class` and :rst:dir:`cpp:struct` is
+   only cosmetic: the prefix rendered in the output, and the specifier shown
+   in the index.
 
    The class can be directly declared inside a nested scope, e.g.,::
 
@@ -573,6 +578,9 @@ visibility statement (``public``, ``private`` or ``protected``).
 
       .. cpp:class:: template<typename T> \
                      std::array<T, 42>
+
+   .. versionadded:: 2.0
+      The :rst:dir:`cpp:struct` directive.
 
 .. rst:directive:: .. cpp:function:: (member) function prototype
 
@@ -706,6 +714,8 @@ visibility statement (``public``, ``private`` or ``protected``).
 
    Describe a union.
 
+   .. versionadded:: 1.8
+
 .. rst:directive:: .. cpp:concept:: template-parameter-list name
 
    .. warning:: The support for concepts is experimental. It is based on the
@@ -750,6 +760,9 @@ visibility statement (``public``, ``private`` or ``protected``).
       - :cpp:expr:`++r`, with return type :cpp:expr:`It&`, when :cpp:expr:`r`
         is incrementable.
 
+   .. versionadded:: 1.5
+
+
 Options
 ^^^^^^^
 
@@ -759,10 +772,12 @@ Some directives support options:
 - ``:tparam-line-spec:``, for templated declarations.
   If specified, each template parameter will be rendered on a separate line.
 
+  .. versionadded:: 1.6
+
 Anonymous Entities
 ~~~~~~~~~~~~~~~~~~
 
-C++ supposrts anonymous namespaces, classes, enums, and unions.
+C++ supports anonymous namespaces, classes, enums, and unions.
 For the sake of documentation they must be given some name that starts with ``@``,
 e.g., ``@42`` or ``@data``.
 These names can also be used in cross-references and (type) expressions,
@@ -792,6 +807,45 @@ This will be rendered as:
       .. cpp:var:: double b
 
 Explicit ref: :cpp:var:`Data::@data::a`. Short-hand ref: :cpp:var:`Data::a`.
+
+.. versionadded:: 1.8
+
+
+Aliasing Declarations
+~~~~~~~~~~~~~~~~~~~~~
+
+Sometimes it may be helpful list declarations elsewhere than their main documentation,
+e.g., when creating a synopsis of a class interface.
+The following directive can be used for this purpose.
+
+.. rst:directive:: .. cpp:alias:: name or function signature
+
+   Insert one or more alias declarations. Each entity can be specified
+   as they can in the :rst:role:`cpp:any` role.
+   If the name of a function is given (as opposed to the complete signature),
+   then all overloads of the function will be listed.
+
+   For example::
+
+       .. cpp:alias:: Data::a
+                      overload_example::C::f
+
+   becomes
+
+   .. cpp:alias:: Data::a
+                  overload_example::C::f
+
+   whereas::
+
+       .. cpp:alias:: void overload_example::C::f(double d) const
+                      void overload_example::C::f(double d)
+
+   becomes
+
+   .. cpp:alias:: void overload_example::C::f(double d) const
+                  void overload_example::C::f(double d)
+
+   .. versionadded:: 2.0
 
 
 Constrained Templates
@@ -850,8 +904,8 @@ Note however that no checking is performed with respect to parameter
 compatibility. E.g., ``Iterator{A, B, C}`` will be accepted as an introduction
 even though it would not be valid C++.
 
-Inline Expressions and Tpes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Inline Expressions and Types
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. rst:role:: cpp:expr
               cpp:texpr
@@ -879,6 +933,11 @@ Inline Expressions and Tpes
    A type: :cpp:expr:`const MySortedContainer<int>&`
    (or as text :cpp:texpr:`const MySortedContainer<int>&`).
 
+   .. versionadded:: 1.7
+      The :rst:role:`cpp:expr` role.
+
+   .. versionadded:: 1.8
+      The :rst:role:`cpp:texpr` role.
 
 Namespacing
 ~~~~~~~~~~~
@@ -941,6 +1000,8 @@ The ``cpp:namespace-pop`` directive undoes the most recent
 
    the current scope will be ``A::B::C::D``.
 
+   .. versionadded:: 1.4
+
 .. rst:directive:: .. cpp:namespace-pop::
 
    Undo the previous ``cpp:namespace-push`` directive (*not* just pop a scope).
@@ -962,6 +1023,8 @@ The ``cpp:namespace-pop`` directive undoes the most recent
 
       .. cpp:namespace-push:: A::B
 
+   .. versionadded:: 1.4
+
 Info field lists
 ~~~~~~~~~~~~~~~~~
 
@@ -982,6 +1045,7 @@ These roles link to the given declaration types:
 
 .. rst:role:: cpp:any
               cpp:class
+              cpp:struct
               cpp:func
               cpp:member
               cpp:var
@@ -992,6 +1056,9 @@ These roles link to the given declaration types:
 
    Reference a C++ declaration by name (see below for details).  The name must
    be properly qualified relative to the position of the link.
+
+   .. versionadded:: 2.0
+      The :rst:role:`cpp:struct` role as alias for the :rst:role:`cpp:class` role.
 
 .. admonition:: Note on References with Templates Parameters/Arguments
 
@@ -1005,19 +1072,45 @@ These roles link to the given declaration types:
    When a custom title is not needed it may be useful to use the roles for inline expressions,
    :rst:role:`cpp:expr` and :rst:role:`cpp:texpr`, where angle brackets do not need escaping.
 
-.. admonition:: Note on References to Overloaded Functions
-
-   It is currently impossible to link to a specific version of an overloaded
-   function.  Currently the C++ domain is the first domain that has basic
-   support for overloaded functions and until there is more data for comparison
-   we don't want to select a bad syntax to reference a specific overload.
-   Currently Sphinx will link to the first overloaded version of the function.
-
 Declarations without template parameters and template arguments
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For linking to non-templated declarations the name must be a nested name, e.g.,
 ``f`` or ``MyClass::f``.
+
+
+Overloaded (member) functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When a (member) function is referenced using just its name, the reference
+will point to an arbitrary matching overload.
+The :rst:role:`cpp:any` and :rst:role:`cpp:func` roles will an alternative
+format, which simply is a complete function declaration.
+This will resolve to the exact matching overload.
+As example, consider the following class declaration:
+
+.. cpp:namespace-push:: overload_example
+.. cpp:class:: C
+
+   .. cpp:function:: void f(double d) const
+   .. cpp:function:: void f(double d)
+   .. cpp:function:: void f(int i)
+   .. cpp:function:: void f()
+
+References using the :rst:role:`cpp:func` role:
+
+- Arbitrary overload: ``C::f``, :cpp:func:`C::f`
+- Also arbitrary overload: ``C::f()``, :cpp:func:`C::f()`
+- Specific overload: ``void C::f()``, :cpp:func:`void C::f()`
+- Specific overload: ``void C::f(int)``, :cpp:func:`void C::f(int)`
+- Specific overload: ``void C::f(double)``, :cpp:func:`void C::f(double)`
+- Specific overload: ``void C::f(double) const``, :cpp:func:`void C::f(double) const`
+
+Note that the :confval:`add_function_parentheses` configuration variable
+does not influence specific overload references.
+
+.. cpp:namespace-pop::
+
 
 Templated declarations
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -1033,19 +1126,25 @@ Assume the following declarations.
                      Inner
 
 In general the reference must include the template parameter declarations,
-e.g., ``template\<typename TOuter> Wrapper::Outer``
-(:cpp:class:`template\<typename TOuter> Wrapper::Outer`).  Currently the lookup
-only succeed if the template parameter identifiers are equal strings. That is,
-``template\<typename UOuter> Wrapper::Outer`` will not work.
+and template arguments for the prefix of qualified names. For example:
 
-The inner class template cannot be directly referenced, unless the current
-namespace is changed or the following shorthand is used.  If a template
-parameter list is omitted, then the lookup will assume either a template or a
-non-template, but not a partial template specialisation.  This means the
-following references work.
+- ``template\<typename TOuter> Wrapper::Outer``
+  (:cpp:class:`template\<typename TOuter> Wrapper::Outer`)
+- ``template\<typename TOuter> template\<typename TInner> Wrapper::Outer<TOuter>::Inner``
+  (:cpp:class:`template\<typename TOuter> template\<typename TInner> Wrapper::Outer<TOuter>::Inner`)
 
-- ``Wrapper::Outer`` (:cpp:class:`Wrapper::Outer`)
-- ``Wrapper::Outer::Inner`` (:cpp:class:`Wrapper::Outer::Inner`)
+Currently the lookup only succeed if the template parameter identifiers are equal strings.
+That is, ``template\<typename UOuter> Wrapper::Outer`` will not work.
+
+As a shorthand notation, if a template parameter list is omitted,
+then the lookup will assume either a primary template or a non-template,
+but not a partial template specialisation.
+This means the following references work as well:
+
+- ``Wrapper::Outer``
+  (:cpp:class:`Wrapper::Outer`)
+- ``Wrapper::Outer::Inner``
+  (:cpp:class:`Wrapper::Outer::Inner`)
 - ``template\<typename TInner> Wrapper::Outer::Inner``
   (:cpp:class:`template\<typename TInner> Wrapper::Outer::Inner`)
 
@@ -1123,7 +1222,7 @@ There is a set of directives allowing documenting command-line programs:
          Run a module as a script.
 
    The directive will create cross-reference targets for the given options,
-   referencable by :rst:role:`option` (in the example case, you'd use something
+   referenceable by :rst:role:`option` (in the example case, you'd use something
    like ``:option:`dest_dir```, ``:option:`-m```, or ``:option:`--module```).
 
    ``cmdoption`` directive is a deprecated alias for the ``option`` directive.
@@ -1131,7 +1230,7 @@ There is a set of directives allowing documenting command-line programs:
 .. rst:directive:: .. envvar:: name
 
    Describes an environment variable that the documented code or program uses
-   or defines.  Referencable by :rst:role:`envvar`.
+   or defines.  Referenceable by :rst:role:`envvar`.
 
 .. rst:directive:: .. program:: name
 
@@ -1325,6 +1424,25 @@ These roles are provided to refer to the described objects:
 .. rst:role:: rst:dir
               rst:role
 
+.. _math-domain:
+
+The Math Domain
+---------------
+
+The math domain (name **math**) provides the following roles::
+
+.. rst:role:: math:numref
+
+   Role for cross-referencing equations defined by :rst:dir:`math` directive
+   via their label.  Example::
+
+      .. math:: e^{i\pi} + 1 = 0
+         :label: euler
+
+      Euler's identity, equation :math:numref:`euler`, was elected one of the
+      most beautiful mathematical formulas.
+
+   .. versionadded:: 1.8
 
 More domains
 ------------

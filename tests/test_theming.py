@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 """
     test_theming
     ~~~~~~~~~~~~
 
     Test the Theme class.
 
-    :copyright: Copyright 2007-2018 by the Sphinx team, see AUTHORS.
+    :copyright: Copyright 2007-2019 by the Sphinx team, see AUTHORS.
     :license: BSD, see LICENSE for details.
 """
 
@@ -124,7 +123,7 @@ def test_theme_sidebars(app, status, warning):
 
     # test-theme specifies globaltoc and searchbox as default sidebars
     result = (app.outdir / 'index.html').text(encoding='utf8')
-    assert '<h3><a href="#">Table Of Contents</a></h3>' in result
+    assert '<h3><a href="#">Table of Contents</a></h3>' in result
     assert '<h3>Related Topics</h3>' not in result
     assert '<h3>This Page</h3>' not in result
     assert '<h3>Quick search</h3>' in result

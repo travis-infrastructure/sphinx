@@ -1,4 +1,4 @@
-PYTHON ?= python
+PYTHON ?= python3
 
 .PHONY: all
 all: clean-pyc clean-backupfiles style-check type-check test
@@ -57,7 +57,7 @@ style-check:
 
 .PHONY: type-check
 type-check:
-	mypy sphinx/
+	mypy sphinx
 
 .PHONY: pylint
 pylint:

@@ -127,7 +127,7 @@ directory in which you want to place the built documentation.
 The :option:`-b <sphinx-build -b>` option selects a builder; in this example
 Sphinx will build HTML files.
 
-|more| Refer to the :program:`sphinx-build man page <sphinx-build>` for all
+|more| Refer to the :doc:`sphinx-build man page </man/sphinx-build>` for all
 options that :program:`sphinx-build` supports.
 
 However, :program:`sphinx-quickstart` script creates a :file:`Makefile` and a
@@ -289,7 +289,7 @@ Intersphinx
 -----------
 
 Many Sphinx documents including the `Python documentation`_ are published on
-the internet.  When you want to make links to such documents from your
+the Internet.  When you want to make links to such documents from your
 documentation, you can do it with :mod:`sphinx.ext.intersphinx`.
 
 .. _Python documentation: https://docs.python.org/3
@@ -318,15 +318,10 @@ features of intersphinx.
 More topics to be covered
 -------------------------
 
-- :doc:`Other extensions </extensions>`:
-
-  * :doc:`/ext/math`,
-  * :doc:`/ext/viewcode`,
-  * :doc:`/ext/doctest`,
-  * ...
+- :doc:`Other extensions </usage/extensions/index>`:
 - Static files
-- :doc:`Selecting a theme </theming>`
-- :doc:`/setuptools`
+- :doc:`Selecting a theme </usage/theming>`
+- :doc:`/usage/advanced/setuptools`
 - :ref:`Templating <templating>`
 - Using extensions
 - :ref:`Writing extensions <dev-extensions>`
@@ -336,7 +331,7 @@ More topics to be covered
 
 .. [#] This is the usual layout.  However, :file:`conf.py` can also live in
        another directory, the :term:`configuration directory`.  Refer to the
-       :program:`sphinx-build man page <sphinx-build>` for more information.
+       :doc:`sphinx-build man page </man/sphinx-build>` for more information.
 
 .. |more| image:: /_static/more.png
           :align: middle
