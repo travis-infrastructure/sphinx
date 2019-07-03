@@ -10,14 +10,12 @@
 
 import re
 import textwrap
-import warnings
 from os import path
 from typing import Iterable, cast
 
 from docutils import nodes, writers
 
 from sphinx import addnodes, __display_version__
-from sphinx.deprecation import RemovedInSphinx30Warning
 from sphinx.errors import ExtensionError
 from sphinx.locale import admonitionlabels, _, __
 from sphinx.util import logging
@@ -247,7 +245,7 @@ class TexinfoTranslator(SphinxTranslator):
         title = self.settings.title  # type: str
         if not title:
             title_node = self.document.next_node(nodes.title)
-            title = (title and title_node.astext()) or '<untitled>'
+            title = (title_node and title_node.astext()) or '<untitled>'
         elements['title'] = self.escape_id(title) or '<untitled>'
         # filename
         if not elements['filename']:
@@ -387,9 +385,12 @@ class TexinfoTranslator(SphinxTranslator):
     def escape_id(self, s):
         # type: (str) -> str
         """Return an escaped string suitable for node names and anchors."""
-        bad_chars = ',:.()'
+        bad_chars = ',:()'
         for bc in bad_chars:
             s = s.replace(bc, ' ')
+        if re.search('[^ .]', s):
+            # remove DOTs if name contains other characters
+            s = s.replace('.', ' ')
         s = ' '.join(s.split()).strip()
         return self.escape(s)
 
@@ -1352,8 +1353,9 @@ class TexinfoTranslator(SphinxTranslator):
         width = self.tex_image_length(attrs.get('width', ''))
         height = self.tex_image_length(attrs.get('height', ''))
         alt = self.escape_arg(attrs.get('alt', ''))
+        filename = "%s-figures/%s" % (self.elements['filename'][:-5], name)  # type: ignore
         self.body.append('\n@image{%s,%s,%s,%s,%s}\n' %
-                         (name, width, height, alt, ext[1:]))
+                         (filename, width, height, alt, ext[1:]))
 
     def depart_image(self, node):
         # type: (nodes.Element) -> None
@@ -1741,13 +1743,3 @@ class TexinfoTranslator(SphinxTranslator):
         self.body.append('\n\n@example\n%s\n@end example\n\n' %
                          self.escape_arg(node.astext()))
         raise nodes.SkipNode
-
-    def _make_visit_admonition(name):  # type: ignore
-        # type: (str) -> Callable[[TexinfoTranslator, nodes.Element], None]
-        warnings.warn('TexinfoTranslator._make_visit_admonition() is deprecated.',
-                      RemovedInSphinx30Warning)
-
-        def visit(self, node):
-            # type: (nodes.Element) -> None
-            self.visit_admonition(node, admonitionlabels[name])
-        return visit

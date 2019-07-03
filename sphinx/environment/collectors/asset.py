@@ -24,8 +24,7 @@ from sphinx.util.images import guess_mimetype
 
 if False:
     # For type annotation
-    from typing import Dict, List, Set, Tuple  # NOQA
-    from docutils import nodes  # NOQA
+    from typing import Dict, List, Set  # NOQA
     from sphinx.sphinx import Sphinx  # NOQA
     from sphinx.environment import BuildEnvironment  # NOQA
 
@@ -101,6 +100,9 @@ class ImageCollector(EnvironmentCollector):
                                         filename)
             try:
                 mimetype = guess_mimetype(filename)
+                if mimetype is None:
+                    basename, suffix = path.splitext(filename)
+                    mimetype = 'image/x-' + suffix[1:]
                 if mimetype not in candidates:
                     globbed.setdefault(mimetype, []).append(new_imgpath)
             except OSError as err:
@@ -135,7 +137,7 @@ class DownloadFileCollector(EnvironmentCollector):
                     logger.warning(__('download file not readable: %s') % filename,
                                    location=node, type='download', subtype='not_readable')
                     continue
-                node['filename'] = app.env.dlfiles.add_file(app.env.docname, filename)
+                node['filename'] = app.env.dlfiles.add_file(app.env.docname, rel_filename)
 
 
 def setup(app):

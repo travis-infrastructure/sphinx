@@ -23,7 +23,7 @@ from sphinx.config import Config
 from sphinx.errors import SphinxError
 from sphinx.testing.util import strip_escseq
 from sphinx.util import docutils
-from sphinx.util.osutil import ensuredir
+from sphinx.util.osutil import cd, ensuredir
 from sphinx.writers.latex import LaTeXTranslator
 
 
@@ -54,15 +54,16 @@ def kpsetest(*filenames):
 def compile_latex_document(app, filename='python.tex'):
     # now, try to run latex over it
     try:
-        ensuredir(app.config.latex_engine)
-        # keep a copy of latex file for this engine in case test fails
-        copyfile(filename, app.config.latex_engine + '/' + filename)
-        args = [app.config.latex_engine,
-                '--halt-on-error',
-                '--interaction=nonstopmode',
-                '-output-directory=%s' % app.config.latex_engine,
-                filename]
-        subprocess.run(args, stdout=PIPE, stderr=PIPE, cwd=app.outdir, check=True)
+        with cd(app.outdir):
+            ensuredir(app.config.latex_engine)
+            # keep a copy of latex file for this engine in case test fails
+            copyfile(filename, app.config.latex_engine + '/' + filename)
+            args = [app.config.latex_engine,
+                    '--halt-on-error',
+                    '--interaction=nonstopmode',
+                    '-output-directory=%s' % app.config.latex_engine,
+                    filename]
+            subprocess.run(args, stdout=PIPE, stderr=PIPE, check=True)
     except OSError:  # most likely the latex executable was not found
         raise pytest.skip.Exception
     except CalledProcessError as exc:
@@ -162,6 +163,16 @@ def test_latex_basic(app, status, warning):
     assert r'\title{The basic Sphinx documentation for testing}' in result
     assert r'\release{}' in result
     assert r'\renewcommand{\releasename}{}' in result
+
+
+@pytest.mark.sphinx('latex', testroot='basic', confoverrides={'language': 'zh'})
+def test_latex_additional_settings_for_language_code(app, status, warning):
+    app.builder.build_all()
+    result = (app.outdir / 'test.tex').text(encoding='utf8')
+    print(result)
+    print(status.getvalue())
+    print(warning.getvalue())
+    assert r'\usepackage{xeCJK}' in result
 
 
 @pytest.mark.sphinx('latex', testroot='latex-title')
@@ -1219,15 +1230,27 @@ def test_latex_raw_directive(app, status, warning):
 
 
 @pytest.mark.sphinx('latex', testroot='images')
-def test_latex_remote_images(app, status, warning):
+def test_latex_images(app, status, warning):
     app.builder.build_all()
 
     result = (app.outdir / 'python.tex').text(encoding='utf8')
+
+    # images are copied
     assert '\\sphinxincludegraphics{{python-logo}.png}' in result
     assert (app.outdir / 'python-logo.png').exists()
+
+    # not found images
     assert '\\sphinxincludegraphics{{NOT_EXIST}.PNG}' not in result
     assert ('WARNING: Could not fetch remote image: '
-            'http://example.com/NOT_EXIST.PNG [404]' in warning.getvalue())
+            'https://www.google.com/NOT_EXIST.PNG [404]' in warning.getvalue())
+
+    # an image having target
+    assert ('\\sphinxhref{https://www.sphinx-doc.org/}'
+            '{\\sphinxincludegraphics{{rimg}.png}}\n\n' in result)
+
+    # a centerized image having target
+    assert ('\\sphinxhref{https://www.python.org/}{{\\hspace*{\\fill}'
+            '\\sphinxincludegraphics{{rimg}.png}\\hspace*{\\fill}}}\n\n' in result)
 
 
 @pytest.mark.sphinx('latex', testroot='latex-index')
@@ -1269,25 +1292,15 @@ def test_latex_nested_enumerated_list(app, status, warning):
     app.builder.build_all()
 
     result = (app.outdir / 'python.tex').text(encoding='utf8')
-    assert ('\\def\\theenumi{\\arabic{enumi}}\n'
-            '\\def\\labelenumi{\\theenumi .}\n'
-            '\\makeatletter\\def\\p@enumii{\\p@enumi \\theenumi .}\\makeatother\n'
+    assert ('\\sphinxsetlistlabels{\\arabic}{enumi}{enumii}{}{.}%\n'
             '\\setcounter{enumi}{4}\n' in result)
-    assert ('\\def\\theenumii{\\alph{enumii}}\n'
-            '\\def\\labelenumii{\\theenumii .}\n'
-            '\\makeatletter\\def\\p@enumiii{\\p@enumii \\theenumii .}\\makeatother\n'
+    assert ('\\sphinxsetlistlabels{\\alph}{enumii}{enumiii}{}{.}%\n'
             '\\setcounter{enumii}{3}\n' in result)
-    assert ('\\def\\theenumiii{\\arabic{enumiii}}\n'
-            '\\def\\labelenumiii{\\theenumiii )}\n'
-            '\\makeatletter\\def\\p@enumiv{\\p@enumiii \\theenumiii )}\\makeatother\n'
+    assert ('\\sphinxsetlistlabels{\\arabic}{enumiii}{enumiv}{}{)}%\n'
             '\\setcounter{enumiii}{9}\n' in result)
-    assert ('\\def\\theenumiv{\\arabic{enumiv}}\n'
-            '\\def\\labelenumiv{(\\theenumiv )}\n'
-            '\\makeatletter\\def\\p@enumv{\\p@enumiv (\\theenumiv )}\\makeatother\n'
+    assert ('\\sphinxsetlistlabels{\\arabic}{enumiv}{enumv}{(}{)}%\n'
             '\\setcounter{enumiv}{23}\n' in result)
-    assert ('\\def\\theenumii{\\roman{enumii}}\n'
-            '\\def\\labelenumii{\\theenumii .}\n'
-            '\\makeatletter\\def\\p@enumiii{\\p@enumii \\theenumii .}\\makeatother\n'
+    assert ('\\sphinxsetlistlabels{\\roman}{enumii}{enumiii}{}{.}%\n'
             '\\setcounter{enumii}{2}\n' in result)
 
 
@@ -1372,6 +1385,16 @@ def test_latex_labels(app, status, warning):
             r'\label{\detokenize{otherdoc:otherdoc}}'
             r'\label{\detokenize{otherdoc::doc}}' in result)
 
+    # Embeded standalone hyperlink reference (refs: #5948)
+    assert result.count(r'\label{\detokenize{index:section1}}') == 1
+
+
+@pytest.mark.sphinx('latex', testroot='latex-figure-in-admonition')
+def test_latex_figure_in_admonition(app, status, warning):
+    app.builder.build_all()
+    result = (app.outdir / 'python.tex').text(encoding='utf8')
+    assert(r'\begin{figure}[H]' in result)
+
 
 def test_default_latex_documents():
     from sphinx.util import texescape
@@ -1383,3 +1406,23 @@ def test_default_latex_documents():
     expected = [('index', 'stasi.tex', 'STASI™ Documentation',
                  r"Wolfgang Schäuble \& G'Beckstein.\@{}", 'manual')]
     assert default_latex_documents(config) == expected
+
+
+@skip_if_requested
+@skip_if_stylefiles_notfound
+@pytest.mark.sphinx('latex', testroot='latex-includegraphics')
+def test_includegraphics_oversized(app, status, warning):
+    app.builder.build_all()
+    print(status.getvalue())
+    print(warning.getvalue())
+    compile_latex_document(app)
+
+
+@pytest.mark.sphinx('latex', testroot='index_on_title')
+def test_index_on_title(app, status, warning):
+    app.builder.build_all()
+    result = (app.outdir / 'python.tex').text(encoding='utf8')
+    assert ('\\chapter{Test for index in top level title}\n'
+            '\\label{\\detokenize{contents:test-for-index-in-top-level-title}}'
+            '\\index{index@\\spxentry{index}}\n'
+            in result)

@@ -8,12 +8,20 @@
     :license: BSD, see LICENSE for details.
 """
 
+import sys
 from io import StringIO
+from unittest.mock import Mock, patch
 
 import pytest
+from docutils import nodes
 
-from sphinx.ext.autosummary import mangle_signature, import_by_name, extract_summary
-from sphinx.testing.util import etree_parse
+from sphinx import addnodes
+from sphinx.ext.autosummary import (
+    autosummary_table, autosummary_toc, mangle_signature, import_by_name, extract_summary
+)
+from sphinx.ext.autosummary.generate import generate_autosummary_docs
+from sphinx.testing.util import assert_node, etree_parse
+from sphinx.util.docutils import new_document
 
 html_warnfile = StringIO()
 
@@ -40,11 +48,13 @@ def test_mangle_signature():
     (a, b[, c]) :: (a, b[, c])
     (a, b[, cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]) :: (a, b[, ...)
     (a, b='c=d, e=f, g=h', c=3) :: (a[, b, c])
+    (a, b="c=d, e=f, g=h", c=3) :: (a[, b, c])
     (a, b='c=d, \\'e=f,\\' g=h', c=3) :: (a[, b, c])
     (a, b='c=d, ', e='\\\\' g=h, c=3) :: (a[, b, e, c])
     (a, b={'c=d, ': 3, '\\\\': 3}) :: (a[, b])
     (a=1, b=2, c=3) :: ([a, b, c])
     (a=1, b=<SomeClass: a, b, c>, c=3) :: ([a, b, c])
+    (a=1, b=T(a=1, b=2), c=3) :: ([a, b, c])
     (a: int, b: int) -> str :: (a, b)
     """
 
@@ -56,8 +66,6 @@ def test_mangle_signature():
 
 
 def test_extract_summary(capsys):
-    from sphinx.util.docutils import new_document
-    from mock import Mock
     settings = Mock(language_code='',
                     id_prefix='',
                     auto_id_prefix='',
@@ -178,6 +186,24 @@ def test_escaping(app, status, warning):
 def test_autosummary_generate(app, status, warning):
     app.builder.build_all()
 
+    doctree = app.env.get_doctree('index')
+    assert_node(doctree, (nodes.paragraph,
+                          nodes.paragraph,
+                          addnodes.tabular_col_spec,
+                          autosummary_table,
+                          autosummary_toc))
+    assert_node(doctree[3],
+                [autosummary_table, nodes.table, nodes.tgroup, (nodes.colspec,
+                                                                nodes.colspec,
+                                                                [nodes.tbody, (nodes.row,
+                                                                               nodes.row,
+                                                                               nodes.row,
+                                                                               nodes.row)])])
+    assert doctree[3][0][0][2][0].astext() == 'autosummary_dummy_module\n\n'
+    assert doctree[3][0][0][2][1].astext() == 'autosummary_dummy_module.Foo()\n\n'
+    assert doctree[3][0][0][2][2].astext() == 'autosummary_dummy_module.bar(x[, y])\n\n'
+    assert doctree[3][0][0][2][3].astext() == 'autosummary_importfail\n\n'
+
     module = (app.srcdir / 'generated' / 'autosummary_dummy_module.rst').text()
     assert ('   .. autosummary::\n'
             '   \n'
@@ -203,7 +229,7 @@ def test_autosummary_latex_table_colspec(app, status, warning):
     result = (app.outdir / 'python.tex').text(encoding='utf8')
     print(status.getvalue())
     print(warning.getvalue())
-    assert r'\begin{longtable}{\X{1}{2}\X{1}{2}}' in result
+    assert r'\begin{longtable}[c]{\X{1}{2}\X{1}{2}}' in result
     assert r'p{0.5\linewidth}' not in result
 
 
@@ -229,3 +255,64 @@ def test_import_by_name():
     assert obj == sphinx.ext.autosummary.Autosummary.get_items
     assert parent is sphinx.ext.autosummary.Autosummary
     assert modname == 'sphinx.ext.autosummary'
+
+
+@pytest.mark.sphinx('dummy', testroot='ext-autosummary-mock_imports')
+def test_autosummary_mock_imports(app, status, warning):
+    try:
+        app.build()
+        assert warning.getvalue() == ''
+
+        # generated/foo is generated successfully
+        assert app.env.get_doctree('generated/foo')
+    finally:
+        sys.modules.pop('foo', None)  # unload foo module
+
+
+@pytest.mark.sphinx('dummy', testroot='ext-autosummary-imported_members')
+def test_autosummary_imported_members(app, status, warning):
+    try:
+        app.build()
+        # generated/foo is generated successfully
+        assert app.env.get_doctree('generated/autosummary_dummy_package')
+
+        module = (app.srcdir / 'generated' / 'autosummary_dummy_package.rst').text()
+        assert ('   .. autosummary::\n'
+                '   \n'
+                '      Bar\n'
+                '   \n' in module)
+        assert ('   .. autosummary::\n'
+                '   \n'
+                '      foo\n'
+                '   \n' in module)
+    finally:
+        sys.modules.pop('autosummary_dummy_package', None)
+
+
+@pytest.mark.sphinx(testroot='ext-autodoc')
+def test_generate_autosummary_docs_property(app):
+    with patch('sphinx.ext.autosummary.generate.find_autosummary_in_files') as mock:
+        mock.return_value = [('target.methods.Base.prop', 'prop', None)]
+        generate_autosummary_docs([], output_dir=app.srcdir, builder=app.builder, app=app)
+
+    content = (app.srcdir / 'target.methods.Base.prop.rst').text()
+    assert content == ("target.methods.Base.prop\n"
+                       "========================\n"
+                       "\n"
+                       ".. currentmodule:: target.methods\n"
+                       "\n"
+                       ".. autoproperty:: Base.prop")
+
+
+@pytest.mark.sphinx('dummy', testroot='ext-autosummary',
+                    confoverrides={'autosummary_generate': []})
+def test_empty_autosummary_generate(app, status, warning):
+    app.build()
+    assert ("WARNING: autosummary: stub file not found 'autosummary_importfail'"
+            in warning.getvalue())
+
+
+@pytest.mark.sphinx('dummy', testroot='ext-autosummary',
+                    confoverrides={'autosummary_generate': ['unknown']})
+def test_invalid_autosummary_generate(app, status, warning):
+    assert 'WARNING: autosummary_generate: file not found: unknown.rst' in warning.getvalue()

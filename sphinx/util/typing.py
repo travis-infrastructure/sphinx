@@ -20,8 +20,14 @@ DirectiveOption = Callable[[str], Any]
 # Text like nodes which are initialized with text and rawsource
 TextlikeNode = Union[nodes.Text, nodes.TextElement]
 
+# type of None
+NoneType = type(None)
+
+# path matcher
+PathMatcher = Callable[[str], bool]
+
 # common role functions
-RoleFunction = Callable[[str, str, str, int, Inliner, Dict, List[str]],
+RoleFunction = Callable[[str, str, str, int, Inliner, Dict[str, Any], List[str]],
                         Tuple[List[nodes.Node], List[nodes.system_message]]]
 
 # title getter functions for enumerable nodes (see sphinx.domains.std)

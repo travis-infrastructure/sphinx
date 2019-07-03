@@ -12,7 +12,6 @@
 """
 
 import re
-import sys
 import warnings
 from collections import defaultdict
 from os import path
@@ -22,15 +21,13 @@ from docutils import nodes, writers
 
 from sphinx import addnodes
 from sphinx import highlighting
-from sphinx.deprecation import (
-    RemovedInSphinx30Warning, RemovedInSphinx40Warning, deprecated_alias
-)
+from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
 from sphinx.domains.std import StandardDomain
 from sphinx.errors import SphinxError
 from sphinx.locale import admonitionlabels, _, __
 from sphinx.util import split_into, logging
 from sphinx.util.docutils import SphinxTranslator
-from sphinx.util.nodes import clean_astext
+from sphinx.util.nodes import clean_astext, get_prev_node
 from sphinx.util.template import LaTeXRenderer
 from sphinx.util.texescape import tex_escape_map, tex_replace_map
 
@@ -216,7 +213,17 @@ ADDITIONAL_SETTINGS = {
         'fncychap':     '',
         'geometry':     '\\usepackage[dvipdfm]{geometry}',
     },
-}  # type: Dict[str, Dict[str, Any]]
+
+    # special settings for latex_engine + language_code
+    ('xelatex', 'fr'): {
+        # use babel instead of polyglossia by default
+        'polyglossia':  '',
+        'babel':        '\\usepackage{babel}',
+    },
+    ('xelatex', 'zh'): {
+        'fontenc':      '\\usepackage{xeCJK}',
+    },
+}  # type: Dict[Any, Dict[str, Any]]
 
 EXTRA_RE = re.compile(r'^(.*\S)\s+\(([^()]*)\)\s*$')
 
@@ -283,20 +290,6 @@ class Table:
                                                 # it maps table location to cell_id
                                                 # (cell = rectangular area)
         self.cell_id = 0                        # last assigned cell_id
-
-    @property
-    def caption_footnotetexts(self):
-        # type: () -> List[str]
-        warnings.warn('table.caption_footnotetexts is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return []
-
-    @property
-    def header_footnotetexts(self):
-        # type: () -> List[str]
-        warnings.warn('table.header_footnotetexts is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return []
 
     def is_longtable(self):
         # type: () -> bool
@@ -473,6 +466,7 @@ class LaTeXTranslator(SphinxTranslator):
         self.in_term = 0
         self.needs_linetrimming = 0
         self.in_minipage = 0
+        self.no_latex_floats = 0
         self.first_document = 1
         self.this_is_the_title = 1
         self.literal_whitespace = 0
@@ -652,27 +646,6 @@ class LaTeXTranslator(SphinxTranslator):
         body = self.body
         self.body = self.bodystack.pop()
         return body
-
-    def restrict_footnote(self, node):
-        # type: (nodes.Element) -> None
-        warnings.warn('LaTeXWriter.restrict_footnote() is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-
-        if self.footnote_restricted is None:
-            self.footnote_restricted = node
-            self.pending_footnotes = []
-
-    def unrestrict_footnote(self, node):
-        # type: (nodes.Element) -> None
-        warnings.warn('LaTeXWriter.unrestrict_footnote() is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-
-        if self.footnote_restricted == node:
-            self.footnote_restricted = None
-            for footnode in self.pending_footnotes:
-                footnode['footnotetext'] = True
-                footnode.walkabout(self)
-            self.pending_footnotes = []
 
     def format_docclass(self, docclass):
         # type: (str) -> str
@@ -1362,11 +1335,8 @@ class LaTeXTranslator(SphinxTranslator):
         suffix = node.get('suffix', '.')
 
         self.body.append('\\begin{enumerate}\n')
-        self.body.append('\\def\\the%s{%s{%s}}\n' % (enum, style, enum))
-        self.body.append('\\def\\label%s{%s\\the%s %s}\n' %
-                         (enum, prefix, enum, suffix))
-        self.body.append('\\makeatletter\\def\\p@%s{\\p@%s %s\\the%s %s}\\makeatother\n' %
-                         (enumnext, enum, prefix, enum, suffix))
+        self.body.append('\\sphinxsetlistlabels{%s}{%s}{%s}{%s}{%s}%%\n' %
+                         (style, enum, enumnext, prefix, suffix))
         if 'start' in node:
             self.body.append('\\setcounter{%s}{%d}\n' % (enum, node['start'] - 1))
         if self.table:
@@ -1533,7 +1503,11 @@ class LaTeXTranslator(SphinxTranslator):
                     # in reverse order
         post = []   # type: List[str]
         include_graphics_options = []
-        is_inline = self.is_inline(node)
+        has_hyperlink = isinstance(node.parent, nodes.reference)
+        if has_hyperlink:
+            is_inline = self.is_inline(node.parent)
+        else:
+            is_inline = self.is_inline(node)
         if 'width' in attrs:
             if 'scale' in attrs:
                 w = self.latex_image_length(attrs['width'], attrs['scale'])
@@ -1561,6 +1535,7 @@ class LaTeXTranslator(SphinxTranslator):
                 (1, 'middle'): ('\\raisebox{-0.5\\height}{', '}'),
                 (1, 'bottom'): ('\\raisebox{-\\height}{', '}'),
                 (0, 'center'): ('{\\hspace*{\\fill}', '\\hspace*{\\fill}}'),
+                (0, 'default'): ('{\\hspace*{\\fill}', '\\hspace*{\\fill}}'),
                 # These 2 don't exactly do the right thing.  The image should
                 # be floated alongside the paragraph.  See
                 # https://www.w3.org/TR/html4/struct/objects.html#adef-align-IMG
@@ -1575,7 +1550,7 @@ class LaTeXTranslator(SphinxTranslator):
         if self.in_parsed_literal:
             pre.append('{\\sphinxunactivateextrasandspace ')
             post.append('}')
-        if not is_inline:
+        if not is_inline and not has_hyperlink:
             pre.append('\n\\noindent')
             post.append('\n')
         pre.reverse()
@@ -1610,6 +1585,9 @@ class LaTeXTranslator(SphinxTranslator):
 
     def visit_figure(self, node):
         # type: (nodes.Element) -> None
+        align = self.elements['figure_align']
+        if self.no_latex_floats:
+            align = "H"
         if self.table:
             # TODO: support align option
             if 'width' in node:
@@ -1635,8 +1613,7 @@ class LaTeXTranslator(SphinxTranslator):
             self.body.append('\n\\begin{center}')
             self.context.append('\\end{center}\n')
         else:
-            self.body.append('\n\\begin{figure}[%s]\n\\centering\n' %
-                             self.elements['figure_align'])
+            self.body.append('\n\\begin{figure}[%s]\n\\centering\n' % align)
             if any(isinstance(child, nodes.caption) for child in node):
                 self.body.append('\\capstart\n')
             self.context.append('\\end{figure}\n')
@@ -1676,20 +1653,24 @@ class LaTeXTranslator(SphinxTranslator):
     def visit_admonition(self, node):
         # type: (nodes.Element) -> None
         self.body.append('\n\\begin{sphinxadmonition}{note}')
+        self.no_latex_floats += 1
 
     def depart_admonition(self, node):
         # type: (nodes.Element) -> None
         self.body.append('\\end{sphinxadmonition}\n')
+        self.no_latex_floats -= 1
 
     def _visit_named_admonition(self, node):
         # type: (nodes.Element) -> None
         label = admonitionlabels[node.tagname]
         self.body.append('\n\\begin{sphinxadmonition}{%s}{%s:}' %
                          (node.tagname, label))
+        self.no_latex_floats += 1
 
     def _depart_named_admonition(self, node):
         # type: (nodes.Element) -> None
         self.body.append('\\end{sphinxadmonition}\n')
+        self.no_latex_floats -= 1
 
     visit_attention = _visit_named_admonition
     depart_attention = _depart_named_admonition
@@ -1755,7 +1736,12 @@ class LaTeXTranslator(SphinxTranslator):
         if 'refuri' in node:
             return
         if node.get('refid'):
-            add_target(node['refid'])
+            prev_node = get_prev_node(node)
+            if isinstance(prev_node, nodes.reference) and node['refid'] == prev_node['refid']:
+                # a target for a hyperlink reference having alias
+                pass
+            else:
+                add_target(node['refid'])
         for id in node['ids']:
             add_target(id)
 
@@ -1772,8 +1758,8 @@ class LaTeXTranslator(SphinxTranslator):
         # type: (nodes.Element) -> None
         self.body.append('\n\\end{flushright}\n')
 
-    def visit_index(self, node, scre = None):
-        # type: (nodes.Element, Pattern) -> None
+    def visit_index(self, node):
+        # type: (nodes.Element) -> None
         def escape(value):
             value = self.encode(value)
             value = value.replace(r'\{', r'\sphinxleftcurlybrace{}')
@@ -1790,10 +1776,6 @@ class LaTeXTranslator(SphinxTranslator):
             else:
                 return '\\spxentry{%s}' % string
 
-        if scre:
-            warnings.warn(('LaTeXTranslator.visit_index() optional argument '
-                           '"scre" is deprecated. It is ignored.'),
-                          RemovedInSphinx30Warning, stacklevel=2)
         if not node.get('inline', True):
             self.body.append('\n')
         entries = node['entries']
@@ -1858,6 +1840,8 @@ class LaTeXTranslator(SphinxTranslator):
             for id in node.get('ids'):
                 anchor = not self.in_caption
                 self.body += self.hypertarget(id, anchor=anchor)
+        if not self.is_inline(node):
+            self.body.append('\n')
         uri = node.get('refuri', '')
         if not uri and node.get('refid'):
             uri = '%' + self.curfilestack[-1] + '#' + node['refid']
@@ -1911,6 +1895,8 @@ class LaTeXTranslator(SphinxTranslator):
     def depart_reference(self, node):
         # type: (nodes.Element) -> None
         self.body.append(self.context.pop())
+        if not self.is_inline(node):
+            self.body.append('\n')
 
     def visit_number_reference(self, node):
         # type: (nodes.Element) -> None
@@ -2115,7 +2101,7 @@ class LaTeXTranslator(SphinxTranslator):
             lang = node.get('language', 'default')
             linenos = node.get('linenos', False)
             highlight_args = node.get('highlight_args', {})
-            highlight_args['force'] = node.get('force_highlighting', False)
+            highlight_args['force'] = node.get('force', False)
             if lang is self.builder.config.highlight_language:
                 # only pass highlighter options for original language
                 opts = self.builder.config.highlight_options
@@ -2483,70 +2469,6 @@ class LaTeXTranslator(SphinxTranslator):
             fnotes[num] = [newnode, False]
         return fnotes
 
-    @property
-    def footnotestack(self):
-        # type: () -> List[Dict[str, List[Union[collected_footnote, bool]]]]
-        warnings.warn('LaTeXWriter.footnotestack is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return []
-
-    @property
-    def bibitems(self):
-        # type: () -> List[List[str]]
-        warnings.warn('LaTeXTranslator.bibitems() is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return []
-
-    @property
-    def in_container_literal_block(self):
-        # type: () -> int
-        warnings.warn('LaTeXTranslator.in_container_literal_block is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return 0
-
-    @property
-    def next_section_ids(self):
-        # type: () -> Set[str]
-        warnings.warn('LaTeXTranslator.next_section_ids is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return set()
-
-    @property
-    def next_hyperlink_ids(self):
-        # type: () -> Dict
-        warnings.warn('LaTeXTranslator.next_hyperlink_ids is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return {}
-
-    def push_hyperlink_ids(self, figtype, ids):
-        # type: (str, Set[str]) -> None
-        warnings.warn('LaTeXTranslator.push_hyperlink_ids() is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        pass
-
-    def pop_hyperlink_ids(self, figtype):
-        # type: (str) -> Set[str]
-        warnings.warn('LaTeXTranslator.pop_hyperlink_ids() is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return set()
-
-    @property
-    def hlsettingstack(self):
-        # type: () -> List[List[Union[str, int]]]
-        warnings.warn('LaTeXTranslator.hlsettingstack is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return [[self.builder.config.highlight_language, sys.maxsize]]
-
-    def check_latex_elements(self):
-        # type: () -> None
-        warnings.warn('check_latex_elements() is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-
-        for key in self.builder.config.latex_elements:
-            if key not in self.elements:
-                msg = __("Unknown configure key: latex_elements[%r] is ignored.")
-                logger.warning(msg % key)
-
     def babel_defmacro(self, name, definition):
         # type: (str, str) -> str
         warnings.warn('babel_defmacro() is deprecated.',
@@ -2560,17 +2482,6 @@ class LaTeXTranslator(SphinxTranslator):
             suffix = ''
 
         return ('%s\\def%s{%s}%s\n' % (prefix, name, definition, suffix))
-
-    def _make_visit_admonition(name):  # type: ignore
-        # type: (str) -> Callable[[LaTeXTranslator, nodes.Element], None]
-        warnings.warn('LaTeXTranslator._make_visit_admonition() is deprecated.',
-                      RemovedInSphinx30Warning)
-
-        def visit_admonition(self, node):
-            # type: (nodes.Element) -> None
-            self.body.append('\n\\begin{sphinxadmonition}{%s}{%s:}' %
-                             (name, admonitionlabels[name]))
-        return visit_admonition
 
     def generate_numfig_format(self, builder):
         # type: (LaTeXBuilder) -> str
@@ -2614,16 +2525,9 @@ class LaTeXTranslator(SphinxTranslator):
 
 
 # Import old modules here for compatibility
-from sphinx.builders.latex.transforms import URI_SCHEMES, ShowUrlsTransform  # NOQA
 from sphinx.builders.latex.util import ExtBabel  # NOQA
 
 
-deprecated_alias('sphinx.writers.latex',
-                 {
-                     'ShowUrlsTransform': ShowUrlsTransform,
-                     'URI_SCHEMES': URI_SCHEMES,
-                 },
-                 RemovedInSphinx30Warning)
 deprecated_alias('sphinx.writers.latex',
                  {
                      'ExtBabel': ExtBabel,

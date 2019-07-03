@@ -15,33 +15,29 @@ import pickle
 import sys
 import warnings
 from collections import deque
-from inspect import isclass
 from io import StringIO
 from os import path
 
 from docutils.parsers.rst import Directive, roles
+from pygments.lexer import Lexer
 
 import sphinx
 from sphinx import package_dir, locale
 from sphinx.config import Config
-from sphinx.config import CONFIG_FILENAME  # NOQA # for compatibility (RemovedInSphinx30)
-from sphinx.deprecation import (
-    RemovedInSphinx30Warning, RemovedInSphinx40Warning
-)
+from sphinx.deprecation import RemovedInSphinx40Warning
 from sphinx.environment import BuildEnvironment
 from sphinx.errors import ApplicationError, ConfigError, VersionRequirementError
 from sphinx.events import EventManager
+from sphinx.highlighting import lexer_classes, lexers
 from sphinx.locale import __
 from sphinx.project import Project
 from sphinx.registry import SphinxComponentRegistry
 from sphinx.util import docutils
-from sphinx.util import import_object, progress_message
 from sphinx.util import logging
-from sphinx.util import pycompat  # noqa: F401
+from sphinx.util import progress_message
 from sphinx.util.build_phase import BuildPhase
 from sphinx.util.console import bold  # type: ignore
-from sphinx.util.docutils import directive_helper
-from sphinx.util.i18n import find_catalog_source_files
+from sphinx.util.i18n import CatalogRepository
 from sphinx.util.logging import prefixed_warnings
 from sphinx.util.osutil import abspath, ensuredir, relpath
 from sphinx.util.tags import Tags
@@ -62,13 +58,12 @@ if False:
 
 builtin_extensions = (
     'sphinx.addnodes',
-    'sphinx.builders.applehelp',
     'sphinx.builders.changes',
     'sphinx.builders.epub3',
+    'sphinx.builders.dirhtml',
     'sphinx.builders.dummy',
     'sphinx.builders.gettext',
     'sphinx.builders.html',
-    'sphinx.builders.htmlhelp',
     'sphinx.builders.latex',
     'sphinx.builders.linkcheck',
     'sphinx.builders.manpage',
@@ -79,6 +74,7 @@ builtin_extensions = (
     'sphinx.config',
     'sphinx.domains.c',
     'sphinx.domains.changeset',
+    'sphinx.domains.citation',
     'sphinx.domains.cpp',
     'sphinx.domains.javascript',
     'sphinx.domains.math',
@@ -93,11 +89,15 @@ builtin_extensions = (
     'sphinx.parsers',
     'sphinx.registry',
     'sphinx.roles',
+    'sphinx.transforms',
+    'sphinx.transforms.compact_bullet_list',
+    'sphinx.transforms.i18n',
+    'sphinx.transforms.references',
     'sphinx.transforms.post_transforms',
     'sphinx.transforms.post_transforms.code',
     'sphinx.transforms.post_transforms.images',
-    'sphinx.transforms.post_transforms.compat',
     'sphinx.util.compat',
+    'sphinx.versioning',
     # collectors should be loaded by specific order
     'sphinx.environment.collectors.dependencies',
     'sphinx.environment.collectors.asset',
@@ -106,7 +106,10 @@ builtin_extensions = (
     'sphinx.environment.collectors.toctree',
     'sphinx.environment.collectors.indexentries',
     # 1st party extensions
+    'sphinxcontrib.applehelp',
     'sphinxcontrib.devhelp',
+    'sphinxcontrib.htmlhelp',
+    'sphinxcontrib.serializinghtml',
     'sphinxcontrib.qthelp',
     # Strictly, alabaster theme is not a builtin extension,
     # but it is loaded automatically to use it as default theme.
@@ -181,7 +184,7 @@ class Sphinx:
             self.warningiserror = warningiserror
         logging.setup(self, self._status, self._warning)
 
-        self.events = EventManager()
+        self.events = EventManager(self)
 
         # keep last few messages for traceback
         # This will be filled by sphinx.util.logging.LastMessagesWriter
@@ -248,7 +251,7 @@ class Sphinx:
 
         # now that we know all config values, collect them from conf.py
         self.config.init_values()
-        self.emit('config-inited', self.config)
+        self.events.emit('config-inited', self.config)
 
         # create the project
         self.project = Project(self.srcdir, self.config.source_suffix)
@@ -264,21 +267,21 @@ class Sphinx:
         """Load translated strings from the configured localedirs if enabled in
         the configuration.
         """
-        if self.config.language is not None:
+        if self.config.language is None:
+            self.translator, has_translation = locale.init([], None)
+        else:
             logger.info(bold(__('loading translations [%s]... ') % self.config.language),
                         nonl=True)
-            user_locale_dirs = [
-                path.join(self.srcdir, x) for x in self.config.locale_dirs]
+
             # compile mo files if sphinx.po file in user locale directories are updated
-            for catinfo in find_catalog_source_files(
-                    user_locale_dirs, self.config.language, domains=['sphinx'],
-                    charset=self.config.source_encoding):
-                catinfo.write_mo(self.config.language)
-            locale_dirs = [None, path.join(package_dir, 'locale')] + user_locale_dirs
-        else:
-            locale_dirs = []
-        self.translator, has_translation = locale.init(locale_dirs, self.config.language)
-        if self.config.language is not None:
+            repo = CatalogRepository(self.srcdir, self.config.locale_dirs,
+                                     self.config.language, self.config.source_encoding)
+            for catalog in repo.catalogs:
+                if catalog.domain == 'sphinx' and catalog.is_outdated():
+                    catalog.write_mo(self.config.language)
+
+            locale_dirs = [None, path.join(package_dir, 'locale')] + list(repo.locale_dirs)
+            self.translator, has_translation = locale.init(locale_dirs, self.config.language)
             if has_translation or self.config.language == 'en':
                 # "en" never needs to be translated
                 logger.info(__('done'))
@@ -318,7 +321,7 @@ class Sphinx:
         # type: () -> None
         self.builder.set_environment(self.env)
         self.builder.init()
-        self.emit('builder-inited')
+        self.events.emit('builder-inited')
 
     # ---- main "build" method -------------------------------------------------
 
@@ -342,9 +345,16 @@ class Sphinx:
             status = (self.statuscode == 0 and
                       __('succeeded') or __('finished with problems'))
             if self._warncount:
-                logger.info(bold(__('build %s, %s warning.',
-                                    'build %s, %s warnings.', self._warncount) %
-                                 (status, self._warncount)))
+                if self.warningiserror:
+                    msg = __('build %s, %s warning (with warnings treated as errors).',
+                             'build %s, %s warnings (with warnings treated as errors).',
+                             self._warncount)
+                else:
+                    msg = __('build %s, %s warning.',
+                             'build %s, %s warnings.',
+                             self._warncount)
+
+                logger.info(bold(msg % (status, self._warncount)))
             else:
                 logger.info(bold(__('build %s.') % status))
 
@@ -359,10 +369,10 @@ class Sphinx:
             envfile = path.join(self.doctreedir, ENV_PICKLE_FILENAME)
             if path.isfile(envfile):
                 os.unlink(envfile)
-            self.emit('build-finished', err)
+            self.events.emit('build-finished', err)
             raise
         else:
-            self.emit('build-finished', None)
+            self.events.emit('build-finished', None)
         self.builder.cleanup()
 
     # ---- general extensibility interface -------------------------------------
@@ -390,18 +400,6 @@ class Sphinx:
         """
         if version > sphinx.__display_version__[:3]:
             raise VersionRequirementError(version)
-
-    def import_object(self, objname, source=None):
-        # type: (str, str) -> Any
-        """Import an object from a ``module.name`` string.
-
-        .. deprecated:: 1.8
-           Use ``sphinx.util.import_object()`` instead.
-        """
-        warnings.warn('app.import_object() is deprecated. '
-                      'Use sphinx.util.add_object_type() instead.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return import_object(objname, source=None)
 
     # event interface
     def connect(self, event, callback):
@@ -431,13 +429,7 @@ class Sphinx:
         Return the return values of all callbacks as a list.  Do not emit core
         Sphinx events in extensions!
         """
-        try:
-            logger.debug('[app] emitting event: %r%s', event, repr(args)[:100])
-        except Exception:
-            # not every object likes to be repr()'d (think
-            # random stuff coming via autodoc)
-            pass
-        return self.events.emit(event, self, *args)
+        return self.events.emit(event, *args)
 
     def emit_firstresult(self, event, *args):
         # type: (str, Any) -> Any
@@ -447,7 +439,7 @@ class Sphinx:
 
         .. versionadded:: 0.5
         """
-        return self.events.emit_firstresult(event, self, *args)
+        return self.events.emit_firstresult(event, *args)
 
     # registering addon parts
 
@@ -587,36 +579,14 @@ class Sphinx:
         self.registry.add_enumerable_node(node, figtype, title_getter, override=override)
         self.add_node(node, override=override, **kwds)
 
-    @property
-    def enumerable_nodes(self):
-        # type: () -> Dict[Type[nodes.Node], Tuple[str, TitleGetter]]
-        warnings.warn('app.enumerable_nodes() is deprecated. '
-                      'Use app.get_domain("std").enumerable_nodes instead.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return self.registry.enumerable_nodes
-
-    def add_directive(self, name, obj, content=None, arguments=None, override=False, **options):  # NOQA
-        # type: (str, Any, bool, Tuple[int, int, bool], bool, Any) -> None
+    def add_directive(self, name, cls, override=False):
+        # type: (str, Type[Directive], bool) -> None
         """Register a Docutils directive.
 
-        *name* must be the prospective directive name.  There are two possible
-        ways to write a directive:
-
-        - In the docutils 0.4 style, *obj* is the directive function.
-          *content*, *arguments* and *options* are set as attributes on the
-          function and determine whether the directive has content, arguments
-          and options, respectively.  **This style is deprecated.**
-
-        - In the docutils 0.5 style, *obj* is the directive class.
-          It must already have attributes named *has_content*,
-          *required_arguments*, *optional_arguments*,
-          *final_argument_whitespace* and *option_spec* that correspond to the
-          options for the function way.  See `the Docutils docs
-          <http://docutils.sourceforge.net/docs/howto/rst-directives.html>`_
-          for details.
-
-        The directive class must inherit from the class
-        ``docutils.parsers.rst.Directive``.
+        *name* must be the prospective directive name.  *cls* is a directive
+        class which inherits ``docutils.parsers.rst.Directive``.  For more
+        details, see `the Docutils docs
+        <http://docutils.sourceforge.net/docs/howto/rst-directives.html>`_ .
 
         For example, the (already existing) :rst:dir:`literalinclude` directive
         would be added like this:
@@ -647,17 +617,12 @@ class Sphinx:
         .. versionchanged:: 1.8
            Add *override* keyword.
         """
-        logger.debug('[app] adding directive: %r',
-                     (name, obj, content, arguments, options))
+        logger.debug('[app] adding directive: %r', (name, cls))
         if not override and docutils.is_directive_registered(name):
             logger.warning(__('directive %r is already registered, it will be overridden'),
                            name, type='app', subtype='add_directive')
 
-        if not isclass(obj) or not issubclass(obj, Directive):
-            directive = directive_helper(obj, content, arguments, **options)
-            docutils.register_directive(name, directive)
-        else:
-            docutils.register_directive(name, obj)
+        docutils.register_directive(name, cls)
 
     def add_role(self, name, role, override=False):
         # type: (str, Any, bool) -> None
@@ -710,26 +675,8 @@ class Sphinx:
         """
         self.registry.add_domain(domain, override=override)
 
-    def override_domain(self, domain):
-        # type: (Type[Domain]) -> None
-        """Override a registered domain.
-
-        Make the given *domain* class known to Sphinx, assuming that there is
-        already a domain with its ``.name``.  The new domain must be a subclass
-        of the existing one.
-
-        .. versionadded:: 1.0
-        .. deprecated:: 1.8
-           Integrated to :meth:`add_domain`.
-        """
-        warnings.warn('app.override_domain() is deprecated. '
-                      'Use app.add_domain() with override option instead.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        self.registry.add_domain(domain, override=True)
-
-    def add_directive_to_domain(self, domain, name, obj, has_content=None, argument_spec=None,
-                                override=False, **option_spec):
-        # type: (str, str, Any, bool, Any, bool, Any) -> None
+    def add_directive_to_domain(self, domain, name, cls, override=False):
+        # type: (str, str, Type[Directive], bool) -> None
         """Register a Docutils directive in a domain.
 
         Like :meth:`add_directive`, but the directive is added to the domain
@@ -739,9 +686,7 @@ class Sphinx:
         .. versionchanged:: 1.8
            Add *override* keyword.
         """
-        self.registry.add_directive_to_domain(domain, name, obj,
-                                              has_content, argument_spec, override=override,
-                                              **option_spec)
+        self.registry.add_directive_to_domain(domain, name, cls, override=override)
 
     def add_role_to_domain(self, domain, name, role, override=False):
         # type: (str, str, Union[RoleFunction, XRefRole], bool) -> None
@@ -825,9 +770,6 @@ class Sphinx:
 
         For the role content, you have the same syntactical possibilities as
         for standard Sphinx roles (see :ref:`xref-syntax`).
-
-        This method is also available under the deprecated alias
-        :meth:`add_description_unit`.
 
         .. versionchanged:: 1.8
            Add *override* keyword.
@@ -1029,22 +971,27 @@ class Sphinx:
         self.registry.add_latex_package(packagename, options)
 
     def add_lexer(self, alias, lexer):
-        # type: (str, Any) -> None
+        # type: (str, Union[Lexer, Type[Lexer]]) -> None
         """Register a new lexer for source code.
 
-        Use *lexer*, which must be an instance of a Pygments lexer class, to
-        highlight code blocks with the given language *alias*.
+        Use *lexer* to highlight code blocks with the given language *alias*.
 
         .. versionadded:: 0.6
+        .. versionchanged:: 2.1
+           Take a lexer class as an argument.  An instance of lexers are
+           still supported until Sphinx-3.x.
         """
         logger.debug('[app] adding lexer: %r', (alias, lexer))
-        from sphinx.highlighting import lexers
-        if lexers is None:
-            return
-        lexers[alias] = lexer
+        if isinstance(lexer, Lexer):
+            warnings.warn('app.add_lexer() API changed; '
+                          'Please give lexer class instead instance',
+                          RemovedInSphinx40Warning)
+            lexers[alias] = lexer
+        else:
+            lexer_classes[alias] = lexer
 
-    def add_autodocumenter(self, cls):
-        # type: (Any) -> None
+    def add_autodocumenter(self, cls, override=False):
+        # type: (Any, bool) -> None
         """Register a new documenter class for the autodoc extension.
 
         Add *cls* as a new documenter class for the :mod:`sphinx.ext.autodoc`
@@ -1056,11 +1003,13 @@ class Sphinx:
         .. todo:: Add real docs for Documenter and subclassing
 
         .. versionadded:: 0.6
+        .. versionchanged:: 2.2
+           Add *override* keyword.
         """
         logger.debug('[app] adding autodocumenter: %r', cls)
         from sphinx.ext.autodoc.directive import AutodocDirective
         self.registry.add_documenter(cls.objtype, cls)
-        self.add_directive('auto' + cls.objtype, AutodocDirective)
+        self.add_directive('auto' + cls.objtype, AutodocDirective, override=override)
 
     def add_autodoc_attrgetter(self, typ, getter):
         # type: (Type, Callable[[Any, str, Any], Any]) -> None
@@ -1201,13 +1150,6 @@ class Sphinx:
                 return False
 
         return True
-
-    @property
-    def _setting_up_extension(self):
-        # type: () -> List[str]
-        warnings.warn('app._setting_up_extension is deprecated.',
-                      RemovedInSphinx30Warning)
-        return ['?']
 
 
 class TemplateBridge:

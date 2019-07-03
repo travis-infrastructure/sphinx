@@ -15,8 +15,11 @@ if sys.version_info < (3, 5):
     sys.exit(1)
 
 install_requires = [
+    'sphinxcontrib-applehelp',
     'sphinxcontrib-devhelp',
     'sphinxcontrib-jsmath',
+    'sphinxcontrib-htmlhelp',
+    'sphinxcontrib-serializinghtml',
     'sphinxcontrib-qthelp',
     'Jinja2>=2.3',
     'Pygments>=2.0',
@@ -35,14 +38,16 @@ extras_require = {
     ':sys_platform=="win32"': [
         'colorama>=0.3.5',
     ],
+    'docs': [
+        'sphinxcontrib-websupport',
+    ],
     'test': [
-        'mock',
         'pytest',
         'pytest-cov',
         'html5lib',
         'flake8>=3.5.0',
         'flake8-import-order',
-        'mypy>=0.590',
+        'mypy>=0.711',
         'docutils-stubs',
     ],
 }
@@ -170,6 +175,7 @@ setup(
     author_email='georg@python.org',
     description='Python documentation generator',
     long_description=long_desc,
+    long_description_content_type='text/x-rst',
     zip_safe=False,
     classifiers=[
         'Development Status :: 5 - Production/Stable',

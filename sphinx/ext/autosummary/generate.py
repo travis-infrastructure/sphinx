@@ -23,28 +23,32 @@ import os
 import pydoc
 import re
 import sys
+import warnings
 
-from jinja2 import FileSystemLoader, TemplateNotFound
+from jinja2 import BaseLoader, FileSystemLoader, TemplateNotFound
 from jinja2.sandbox import SandboxedEnvironment
 
 import sphinx.locale
 from sphinx import __display_version__
 from sphinx import package_dir
+from sphinx.deprecation import RemovedInSphinx40Warning
 from sphinx.ext.autosummary import import_by_name, get_documenter
 from sphinx.jinja2glue import BuiltinTemplateLoader
 from sphinx.locale import __
 from sphinx.registry import SphinxComponentRegistry
+from sphinx.util import logging
+from sphinx.util import rst
 from sphinx.util.inspect import safe_getattr
 from sphinx.util.osutil import ensuredir
-from sphinx.util.rst import escape as rst_escape
 
 if False:
     # For type annotation
-    from typing import Any, Callable, Dict, List, Tuple, Type, Union  # NOQA
-    from sphinx import addnodes  # NOQA
+    from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union  # NOQA
     from sphinx.builders import Builder  # NOQA
-    from sphinx.environment import BuildEnvironment  # NOQA
     from sphinx.ext.autodoc import Documenter  # NOQA
+
+
+logger = logging.getLogger(__name__)
 
 
 class DummyApplication:
@@ -53,6 +57,8 @@ class DummyApplication:
     def __init__(self):
         # type: () -> None
         self.registry = SphinxComponentRegistry()
+        self.messagelog = []  # type: List[str]
+        self.verbosity = 0
 
 
 def setup_documenters(app):
@@ -60,12 +66,14 @@ def setup_documenters(app):
     from sphinx.ext.autodoc import (
         ModuleDocumenter, ClassDocumenter, ExceptionDocumenter, DataDocumenter,
         FunctionDocumenter, MethodDocumenter, AttributeDocumenter,
-        InstanceAttributeDocumenter
+        InstanceAttributeDocumenter, DecoratorDocumenter, PropertyDocumenter,
+        SlotsAttributeDocumenter,
     )
     documenters = [
         ModuleDocumenter, ClassDocumenter, ExceptionDocumenter, DataDocumenter,
         FunctionDocumenter, MethodDocumenter, AttributeDocumenter,
-        InstanceAttributeDocumenter
+        InstanceAttributeDocumenter, DecoratorDocumenter, PropertyDocumenter,
+        SlotsAttributeDocumenter,
     ]  # type: List[Type[Documenter]]
     for documenter in documenters:
         app.registry.add_documenter(documenter.objtype, documenter)
@@ -88,46 +96,142 @@ def _underline(title, line='='):
     return title + '\n' + line * len(title)
 
 
+class AutosummaryRenderer:
+    """A helper class for rendering."""
+
+    def __init__(self, builder, template_dir):
+        # type: (Builder, str) -> None
+        loader = None  # type: BaseLoader
+        template_dirs = [os.path.join(package_dir, 'ext', 'autosummary', 'templates')]
+        if builder is None:
+            if template_dir:
+                template_dirs.insert(0, template_dir)
+            loader = FileSystemLoader(template_dirs)
+        else:
+            # allow the user to override the templates
+            loader = BuiltinTemplateLoader()
+            loader.init(builder, dirs=template_dirs)
+
+        self.env = SandboxedEnvironment(loader=loader)
+        self.env.filters['escape'] = rst.escape
+        self.env.filters['e'] = rst.escape
+        self.env.filters['underline'] = _underline
+
+    def exists(self, template_name):
+        # type: (str) -> bool
+        """Check if template file exists."""
+        try:
+            self.env.get_template(template_name)
+            return True
+        except TemplateNotFound:
+            return False
+
+    def render(self, template_name, context):
+        # type: (str, Dict) -> str
+        """Render a template file."""
+        return self.env.get_template(template_name).render(context)
+
+
 # -- Generating output ---------------------------------------------------------
 
+
+def generate_autosummary_content(name, obj, parent, template, template_name,
+                                 imported_members, app):
+    # type: (str, Any, Any, AutosummaryRenderer, str, bool, Any) -> str
+    doc = get_documenter(app, obj, parent)
+
+    if template_name is None:
+        template_name = 'autosummary/%s.rst' % doc.objtype
+        if not template.exists(template_name):
+            template_name = 'autosummary/base.rst'
+
+    def get_members(obj, types, include_public=[], imported=True):
+        # type: (Any, Set[str], List[str], bool) -> Tuple[List[str], List[str]]  # NOQA
+        items = []  # type: List[str]
+        for name in dir(obj):
+            try:
+                value = safe_getattr(obj, name)
+            except AttributeError:
+                continue
+            documenter = get_documenter(app, value, obj)
+            if documenter.objtype in types:
+                if imported or getattr(value, '__module__', None) == obj.__name__:
+                    # skip imported members if expected
+                    items.append(name)
+        public = [x for x in items
+                  if x in include_public or not x.startswith('_')]
+        return public, items
+
+    ns = {}  # type: Dict[str, Any]
+
+    if doc.objtype == 'module':
+        ns['members'] = dir(obj)
+        ns['functions'], ns['all_functions'] = \
+            get_members(obj, {'function'}, imported=imported_members)
+        ns['classes'], ns['all_classes'] = \
+            get_members(obj, {'class'}, imported=imported_members)
+        ns['exceptions'], ns['all_exceptions'] = \
+            get_members(obj, {'exception'}, imported=imported_members)
+    elif doc.objtype == 'class':
+        ns['members'] = dir(obj)
+        ns['inherited_members'] = \
+            set(dir(obj)) - set(obj.__dict__.keys())
+        ns['methods'], ns['all_methods'] = \
+            get_members(obj, {'method'}, ['__init__'])
+        ns['attributes'], ns['all_attributes'] = \
+            get_members(obj, {'attribute', 'property'})
+
+    parts = name.split('.')
+    if doc.objtype in ('method', 'attribute', 'property'):
+        mod_name = '.'.join(parts[:-2])
+        cls_name = parts[-2]
+        obj_name = '.'.join(parts[-2:])
+        ns['class'] = cls_name
+    else:
+        mod_name, obj_name = '.'.join(parts[:-1]), parts[-1]
+
+    ns['fullname'] = name
+    ns['module'] = mod_name
+    ns['objname'] = obj_name
+    ns['name'] = parts[-1]
+
+    ns['objtype'] = doc.objtype
+    ns['underline'] = len(name) * '='
+
+    return template.render(template_name, ns)
+
+
 def generate_autosummary_docs(sources, output_dir=None, suffix='.rst',
-                              warn=_simple_warn, info=_simple_info,
-                              base_path=None, builder=None, template_dir=None,
-                              imported_members=False, app=None):
+                              warn=None, info=None, base_path=None, builder=None,
+                              template_dir=None, imported_members=False, app=None):
     # type: (List[str], str, str, Callable, Callable, str, Builder, str, bool, Any) -> None
+    if info:
+        warnings.warn('info argument for generate_autosummary_docs() is deprecated.',
+                      RemovedInSphinx40Warning)
+        _info = info
+    else:
+        _info = logger.info
+
+    if warn:
+        warnings.warn('warn argument for generate_autosummary_docs() is deprecated.',
+                      RemovedInSphinx40Warning)
+        _warn = warn
+    else:
+        _warn = logger.warning
 
     showed_sources = list(sorted(sources))
     if len(showed_sources) > 20:
         showed_sources = showed_sources[:10] + ['...'] + showed_sources[-10:]
-    info(__('[autosummary] generating autosummary for: %s') %
-         ', '.join(showed_sources))
+    _info(__('[autosummary] generating autosummary for: %s') %
+          ', '.join(showed_sources))
 
     if output_dir:
-        info(__('[autosummary] writing to %s') % output_dir)
+        _info(__('[autosummary] writing to %s') % output_dir)
 
     if base_path is not None:
         sources = [os.path.join(base_path, filename) for filename in sources]
 
-    # create our own templating environment
-    template_dirs = None  # type: List[str]
-    template_dirs = [os.path.join(package_dir, 'ext',
-                                  'autosummary', 'templates')]
-
-    template_loader = None  # type: Union[BuiltinTemplateLoader, FileSystemLoader]
-    if builder is not None:
-        # allow the user to override the templates
-        template_loader = BuiltinTemplateLoader()
-        template_loader.init(builder, dirs=template_dirs)
-    else:
-        if template_dir:
-            template_dirs.insert(0, template_dir)
-        template_loader = FileSystemLoader(template_dirs)
-    template_env = SandboxedEnvironment(loader=template_loader)
-    template_env.filters['underline'] = _underline
-
-    # replace the builtin html filters
-    template_env.filters['escape'] = rst_escape
-    template_env.filters['e'] = rst_escape
+    template = AutosummaryRenderer(builder, template_dir)
 
     # read
     items = find_autosummary_in_files(sources)
@@ -148,7 +252,7 @@ def generate_autosummary_docs(sources, output_dir=None, suffix='.rst',
         try:
             name, obj, parent, mod_name = import_by_name(name)
         except ImportError as e:
-            warn('[autosummary] failed to import %r: %s' % (name, e))
+            _warn('[autosummary] failed to import %r: %s' % (name, e))
             continue
 
         fn = os.path.join(path, name + suffix)
@@ -160,71 +264,9 @@ def generate_autosummary_docs(sources, output_dir=None, suffix='.rst',
         new_files.append(fn)
 
         with open(fn, 'w') as f:
-            doc = get_documenter(app, obj, parent)
-
-            if template_name is not None:
-                template = template_env.get_template(template_name)
-            else:
-                try:
-                    template = template_env.get_template('autosummary/%s.rst'
-                                                         % doc.objtype)
-                except TemplateNotFound:
-                    template = template_env.get_template('autosummary/base.rst')
-
-            def get_members(obj, typ, include_public=[], imported=True):
-                # type: (Any, str, List[str], bool) -> Tuple[List[str], List[str]]
-                items = []  # type: List[str]
-                for name in dir(obj):
-                    try:
-                        value = safe_getattr(obj, name)
-                    except AttributeError:
-                        continue
-                    documenter = get_documenter(app, value, obj)
-                    if documenter.objtype == typ:
-                        if imported or getattr(value, '__module__', None) == obj.__name__:
-                            # skip imported members if expected
-                            items.append(name)
-                public = [x for x in items
-                          if x in include_public or not x.startswith('_')]
-                return public, items
-
-            ns = {}  # type: Dict[str, Any]
-
-            if doc.objtype == 'module':
-                ns['members'] = dir(obj)
-                ns['functions'], ns['all_functions'] = \
-                    get_members(obj, 'function', imported=imported_members)
-                ns['classes'], ns['all_classes'] = \
-                    get_members(obj, 'class', imported=imported_members)
-                ns['exceptions'], ns['all_exceptions'] = \
-                    get_members(obj, 'exception', imported=imported_members)
-            elif doc.objtype == 'class':
-                ns['members'] = dir(obj)
-                ns['inherited_members'] = \
-                    set(dir(obj)) - set(obj.__dict__.keys())
-                ns['methods'], ns['all_methods'] = \
-                    get_members(obj, 'method', ['__init__'])
-                ns['attributes'], ns['all_attributes'] = \
-                    get_members(obj, 'attribute')
-
-            parts = name.split('.')
-            if doc.objtype in ('method', 'attribute'):
-                mod_name = '.'.join(parts[:-2])
-                cls_name = parts[-2]
-                obj_name = '.'.join(parts[-2:])
-                ns['class'] = cls_name
-            else:
-                mod_name, obj_name = '.'.join(parts[:-1]), parts[-1]
-
-            ns['fullname'] = name
-            ns['module'] = mod_name
-            ns['objname'] = obj_name
-            ns['name'] = parts[-1]
-
-            ns['objtype'] = doc.objtype
-            ns['underline'] = len(name) * '='
-
-            rendered = template.render(**ns)
+            rendered = generate_autosummary_content(name, obj, parent,
+                                                    template, template_name,
+                                                    imported_members, app)
             f.write(rendered)
 
     # descend recursively to new files
@@ -407,6 +449,7 @@ def main(argv=sys.argv[1:]):
     sphinx.locale.init_console(os.path.join(package_dir, 'locale'), 'sphinx')
 
     app = DummyApplication()
+    logging.setup(app, sys.stdout, sys.stderr)  # type: ignore
     setup_documenters(app)
     args = get_parser().parse_args(argv)
     generate_autosummary_docs(args.source_file, args.output_dir,

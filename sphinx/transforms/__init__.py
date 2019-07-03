@@ -9,7 +9,6 @@
 """
 
 import re
-from typing import cast
 
 from docutils import nodes
 from docutils.transforms import Transform, Transformer
@@ -19,15 +18,16 @@ from docutils.utils import normalize_language_tag
 from docutils.utils.smartquotes import smartchars
 
 from sphinx import addnodes
+from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
 from sphinx.locale import _, __
 from sphinx.util import logging
 from sphinx.util.docutils import new_document
 from sphinx.util.i18n import format_date
-from sphinx.util.nodes import apply_source_workaround, is_smartquotable
+from sphinx.util.nodes import NodeMatcher, apply_source_workaround, is_smartquotable
 
 if False:
     # For type annotation
-    from typing import Any, Generator, List, Tuple  # NOQA
+    from typing import Any, Dict, Generator, List, Tuple  # NOQA
     from sphinx.application import Sphinx  # NOQA
     from sphinx.config import Config  # NOQA
     from sphinx.domain.std import StandardDomain  # NOQA
@@ -36,11 +36,11 @@ if False:
 
 logger = logging.getLogger(__name__)
 
-default_substitutions = set([
+default_substitutions = {
     'version',
     'release',
     'today',
-])
+}
 
 
 class SphinxTransform(Transform):
@@ -198,32 +198,6 @@ class SortIds(SphinxTransform):
                 node['ids'] = node['ids'][1:] + [node['ids'][0]]
 
 
-class CitationReferences(SphinxTransform):
-    """
-    Replace citation references by pending_xref nodes before the default
-    docutils transform tries to resolve them.
-    """
-    default_priority = 619
-
-    def apply(self, **kwargs):
-        # type: (Any) -> None
-        # mark citation labels as not smartquoted
-        for citation in self.document.traverse(nodes.citation):
-            label = cast(nodes.label, citation[0])
-            label['support_smartquotes'] = False
-
-        for citation_ref in self.document.traverse(nodes.citation_reference):
-            cittext = citation_ref.astext()
-            refnode = addnodes.pending_xref(cittext, refdomain='std', reftype='citation',
-                                            reftarget=cittext, refwarn=True,
-                                            support_smartquotes=False,
-                                            ids=citation_ref["ids"])
-            refnode.source = citation_ref.source or citation_ref.parent.source
-            refnode.line = citation_ref.line or citation_ref.parent.line
-            refnode += nodes.Text('[' + cittext + ']')
-            citation_ref.parent.replace(citation_ref, refnode)
-
-
 TRANSLATABLE_NODES = {
     'literal-block': nodes.literal_block,
     'doctest-block': nodes.doctest_block,
@@ -309,6 +283,19 @@ class UnreferencedFootnotesDetector(SphinxTransform):
                                location=node)
 
 
+class FigureAligner(SphinxTransform):
+    """
+    Align figures to center by default.
+    """
+    default_priority = 700
+
+    def apply(self, **kwargs):
+        # type: (Any) -> None
+        matcher = NodeMatcher(nodes.table, nodes.figure)
+        for node in self.document.traverse(matcher):  # type: nodes.Element
+            node.setdefault('align', 'default')
+
+
 class FilterSystemMessages(SphinxTransform):
     """Filter system messages from a doctree."""
     default_priority = 999
@@ -327,11 +314,7 @@ class SphinxContentsFilter(ContentsFilter):
     Used with BuildEnvironment.add_toc_from() to discard cross-file links
     within table-of-contents link nodes.
     """
-    def visit_pending_xref(self, node):
-        # type: (addnodes.pending_xref) -> None
-        text = node.astext()
-        self.parent.append(nodes.literal(text, text))
-        raise nodes.SkipNode
+    visit_pending_xref = ContentsFilter.ignore_node_but_process_children
 
     def visit_image(self, node):
         # type: (nodes.image) -> None
@@ -420,3 +403,39 @@ class ManpageLink(SphinxTransform):
             if r:
                 info = r.groupdict()
             node.attributes.update(info)
+
+
+from sphinx.domains.citation import (  # NOQA
+    CitationDefinitionTransform, CitationReferenceTransform
+)
+
+deprecated_alias('sphinx.transforms',
+                 {
+                     'CitationReferences': CitationReferenceTransform,
+                     'SmartQuotesSkipper': CitationDefinitionTransform,
+                 },
+                 RemovedInSphinx40Warning)
+
+
+def setup(app):
+    # type: (Sphinx) -> Dict[str, Any]
+    app.add_transform(ApplySourceWorkaround)
+    app.add_transform(ExtraTranslatableNodes)
+    app.add_transform(DefaultSubstitutions)
+    app.add_transform(MoveModuleTargets)
+    app.add_transform(HandleCodeBlocks)
+    app.add_transform(SortIds)
+    app.add_transform(FigureAligner)
+    app.add_transform(AutoNumbering)
+    app.add_transform(AutoIndexUpgrader)
+    app.add_transform(FilterSystemMessages)
+    app.add_transform(UnreferencedFootnotesDetector)
+    app.add_transform(SphinxSmartQuotes)
+    app.add_transform(DoctreeReadEvent)
+    app.add_transform(ManpageLink)
+
+    return {
+        'version': 'builtin',
+        'parallel_read_safe': True,
+        'parallel_write_safe': True,
+    }

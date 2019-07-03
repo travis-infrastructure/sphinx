@@ -18,7 +18,7 @@ from tokenize import COMMENT, NL
 
 if False:
     # For type annotation
-    from typing import Any, Dict, IO, List, Tuple  # NOQA
+    from typing import Any, Dict, List, Tuple  # NOQA
 
 comment_re = re.compile('^\\s*#: ?(.*)\r?\n?$')
 indent_re = re.compile('^\\s*$')
@@ -357,6 +357,17 @@ class VariableCommentPicker(ast.NodeVisitor):
             except TypeError:
                 pass  # this assignment is not new definition!
 
+    def visit_Try(self, node):
+        # type: (ast.Try) -> None
+        """Handles Try node and processes body and else-clause.
+
+        .. note:: pycode parser ignores objects definition in except-clause.
+        """
+        for subnode in node.body:
+            self.visit(subnode)
+        for subnode in node.orelse:
+            self.visit(subnode)
+
     def visit_ClassDef(self, node):
         # type: (ast.ClassDef) -> None
         """Handles ClassDef node and set context."""
@@ -381,8 +392,17 @@ class VariableCommentPicker(ast.NodeVisitor):
             self.context.pop()
             self.current_function = None
 
+    def visit_AsyncFunctionDef(self, node):
+        # type: (ast.AsyncFunctionDef) -> None
+        """Handles AsyncFunctionDef node and set context."""
+        self.visit_FunctionDef(node)  # type: ignore
+
 
 class DefinitionFinder(TokenProcessor):
+    """Python source code parser to detect location of functions,
+    classes and methods.
+    """
+
     def __init__(self, lines):
         # type: (List[str]) -> None
         super().__init__(lines)
@@ -393,6 +413,7 @@ class DefinitionFinder(TokenProcessor):
 
     def add_definition(self, name, entry):
         # type: (str, Tuple[str, int, int]) -> None
+        """Add a location of definition."""
         if self.indents and self.indents[-1][0] == 'def' and entry[0] == 'def':
             # ignore definition of inner function
             pass
@@ -401,6 +422,7 @@ class DefinitionFinder(TokenProcessor):
 
     def parse(self):
         # type: () -> None
+        """Parse the code to obtain location of definitions."""
         while True:
             token = self.fetch_token()
             if token is None:
@@ -422,6 +444,7 @@ class DefinitionFinder(TokenProcessor):
 
     def parse_definition(self, typ):
         # type: (str) -> None
+        """Parse AST of definition."""
         name = self.fetch_token()
         self.context.append(name.value)
         funcname = '.'.join(self.context)
@@ -443,6 +466,7 @@ class DefinitionFinder(TokenProcessor):
 
     def finalize_block(self):
         # type: () -> None
+        """Finalize definition block."""
         definition = self.indents.pop()
         if definition[0] != 'other':
             typ, funcname, start_pos = definition

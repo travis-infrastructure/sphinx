@@ -54,8 +54,6 @@ package.
 
 .. automethod:: Sphinx.add_domain(domain)
 
-.. automethod:: Sphinx.override_domain(domain)
-
 .. method:: Sphinx.add_directive_to_domain(domain, name, func, content, arguments, \*\*options)
 .. automethod:: Sphinx.add_directive_to_domain(domain, name, directiveclass)
 
@@ -147,9 +145,9 @@ Sphinx core events
 ------------------
 
 These events are known to the core.  The arguments shown are given to the
-registered event handlers.  Use :meth:`.connect` in an extension's ``setup``
-function (note that ``conf.py`` can also have a ``setup`` function) to connect
-handlers to the events.  Example:
+registered event handlers.  Use :meth:`.Sphinx.connect` in an extension's
+``setup`` function (note that ``conf.py`` can also have a ``setup`` function) to
+connect handlers to the events.  Example:
 
 .. code-block:: python
 

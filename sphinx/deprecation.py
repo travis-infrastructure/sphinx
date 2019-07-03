@@ -17,15 +17,15 @@ if False:
     from typing import Any, Dict, Type  # NOQA
 
 
-class RemovedInSphinx30Warning(PendingDeprecationWarning):
+class RemovedInSphinx40Warning(DeprecationWarning):
     pass
 
 
-class RemovedInSphinx40Warning(PendingDeprecationWarning):
+class RemovedInSphinx50Warning(PendingDeprecationWarning):
     pass
 
 
-RemovedInNextVersionWarning = RemovedInSphinx30Warning
+RemovedInNextVersionWarning = RemovedInSphinx40Warning
 
 
 def deprecated_alias(modname, objects, warning):
@@ -37,7 +37,7 @@ def deprecated_alias(modname, objects, warning):
     sys.modules[modname] = _ModuleWrapper(module, modname, objects, warning)  # type: ignore
 
 
-class _ModuleWrapper(object):
+class _ModuleWrapper:
     def __init__(self, module, modname, objects, warning):
         # type: (Any, str, Dict, Type[Warning]) -> None
         self._module = module
@@ -48,8 +48,8 @@ class _ModuleWrapper(object):
     def __getattr__(self, name):
         # type: (str) -> Any
         if name in self._objects:
-            warnings.warn("%s.%s is now deprecated. Please refer CHANGES to grasp"
-                          "the changes of Sphinx API." % (self._modname, name),
+            warnings.warn("%s.%s is deprecated. Check CHANGES for Sphinx "
+                          "API modifications." % (self._modname, name),
                           self._warning, stacklevel=3)
             return self._objects[name]
 

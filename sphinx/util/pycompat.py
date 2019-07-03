@@ -13,39 +13,24 @@ import io
 import sys
 import textwrap
 import warnings
+from typing import Any, Callable
 
 from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
 from sphinx.locale import __
 from sphinx.util import logging
-
-if False:
-    # For type annotation
-    from typing import Any, Callable, Generator  # NOQA
+from sphinx.util.console import terminal_safe
+from sphinx.util.typing import NoneType
 
 
 logger = logging.getLogger(__name__)
 
 
-NoneType = type(None)
-
 # ------------------------------------------------------------------------------
 # Python 2/3 compatibility
 
-# sys_encoding: some kind of default system encoding; should be used with
-# a lenient error handler
-sys_encoding = sys.getdefaultencoding()
-
-
-# terminal_safe(): safely encode a string for printing to the terminal
-def terminal_safe(s):
-    # type: (str) -> str
-    return s.encode('ascii', 'backslashreplace').decode('ascii')
-
-
 # convert_with_2to3():
 # support for running 2to3 over config files
-def convert_with_2to3(filepath):
-    # type: (str) -> str
+def convert_with_2to3(filepath: str) -> str:
     from lib2to3.refactor import RefactoringTool, get_fixers_from_package
     from lib2to3.pgen2.parse import ParseError
     fixers = get_fixers_from_package('lib2to3.fixes')
@@ -73,8 +58,7 @@ class UnicodeMixin:
         return self.__unicode__()
 
 
-def execfile_(filepath, _globals, open=open):
-    # type: (str, Any, Callable) -> None
+def execfile_(filepath: str, _globals: Any, open: Callable = open) -> None:
     from sphinx.util.osutil import fs_encoding
     with open(filepath, 'rb') as f:
         source = f.read()
@@ -99,9 +83,12 @@ def execfile_(filepath, _globals, open=open):
 
 deprecated_alias('sphinx.util.pycompat',
                  {
+                     'NoneType': NoneType,  # type: ignore
                      'TextIOWrapper': io.TextIOWrapper,
                      'htmlescape': html.escape,
                      'indent': textwrap.indent,
+                     'terminal_safe': terminal_safe,
+                     'sys_encoding': sys.getdefaultencoding(),
                      'u': '',
                  },
                  RemovedInSphinx40Warning)

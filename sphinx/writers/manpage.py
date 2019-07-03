@@ -282,7 +282,7 @@ class ManualPageTranslator(SphinxTranslator, BaseTranslator):
 
     def depart_rubric(self, node):
         # type: (nodes.Element) -> None
-        pass
+        self.body.append('\n')
 
     def visit_seealso(self, node):
         # type: (nodes.Element) -> None
@@ -466,6 +466,21 @@ class ManualPageTranslator(SphinxTranslator, BaseTranslator):
     def depart_manpage(self, node):
         # type: (nodes.Element) -> None
         return self.depart_strong(node)
+
+    # overwritten: handle section titles better than in 0.6 release
+    def visit_caption(self, node):
+        # type: (nodes.Element) -> None
+        if isinstance(node.parent, nodes.container) and node.parent.get('literal_block'):
+            self.body.append('.sp\n')
+        else:
+            super().visit_caption(node)
+
+    def depart_caption(self, node):
+        # type: (nodes.Element) -> None
+        if isinstance(node.parent, nodes.container) and node.parent.get('literal_block'):
+            self.body.append('\n')
+        else:
+            super().depart_caption(node)
 
     # overwritten: handle section titles better than in 0.6 release
     def visit_title(self, node):

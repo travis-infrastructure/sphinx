@@ -12,9 +12,7 @@
 from collections import namedtuple
 from inspect import cleandoc
 from textwrap import dedent
-from unittest import TestCase
-
-import mock
+from unittest import TestCase, mock
 
 from sphinx.ext.napoleon import Config
 from sphinx.ext.napoleon.docstring import GoogleDocstring, NumpyDocstring
@@ -38,7 +36,7 @@ class NamedtupleSubclass(namedtuple('NamedtupleSubclass', ('attr1', 'attr2'))):
     __slots__ = ()
 
     def __new__(cls, attr1, attr2=None):
-        return super(NamedtupleSubclass, cls).__new__(cls, attr1, attr2)
+        return super().__new__(cls, attr1, attr2)
 
 
 class BaseDocstringTest(TestCase):
@@ -475,12 +473,21 @@ Raises:
         A setting wasn't specified, or was invalid.
     ValueError:
         Something something value error.
+    :py:class:`AttributeError`
+        errors for missing attributes.
+    ~InvalidDimensionsError
+        If the dimensions couldn't be parsed.
+    `InvalidArgumentsError`
+        If the arguments are invalid.
 
 """, """
 Example Function
 
 :raises RuntimeError: A setting wasn't specified, or was invalid.
 :raises ValueError: Something something value error.
+:raises AttributeError: errors for missing attributes.
+:raises ~InvalidDimensionsError: If the dimensions couldn't be parsed.
+:raises InvalidArgumentsError: If the arguments are invalid.
 """),
                       ################################
                       ("""
@@ -1344,8 +1351,8 @@ arg_ : type
 """
 
         expected = """
-:ivar arg_: some description
-:vartype arg_: type
+:ivar arg\\_: some description
+:vartype arg\\_: type
 """
 
         config = Config(napoleon_use_ivar=True)

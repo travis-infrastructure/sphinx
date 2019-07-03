@@ -296,25 +296,26 @@ General configuration
 
    Sphinx supports following warning types:
 
-   * app.add_node
-   * app.add_directive
-   * app.add_role
-   * app.add_generic_role
-   * app.add_source_parser
-   * download.not_readable
-   * image.not_readable
-   * ref.term
-   * ref.ref
-   * ref.numref
-   * ref.keyword
-   * ref.option
-   * ref.citation
-   * ref.footnote
-   * ref.doc
-   * ref.python
-   * misc.highlighting_failure
-   * toc.secnum
-   * epub.unknown_project_files
+   * ``app.add_node``
+   * ``app.add_directive``
+   * ``app.add_role``
+   * ``app.add_generic_role``
+   * ``app.add_source_parser``
+   * ``download.not_readable``
+   * ``image.not_readable``
+   * ``ref.term``
+   * ``ref.ref``
+   * ``ref.numref``
+   * ``ref.keyword``
+   * ``ref.option``
+   * ``ref.citation``
+   * ``ref.footnote``
+   * ``ref.doc``
+   * ``ref.python``
+   * ``misc.highlighting_failure``
+   * ``toc.secnum``
+   * ``epub.unknown_project_files``
+   * ``autosectionlabel.*``
 
    You can choose from these types.
 
@@ -333,6 +334,10 @@ General configuration
    .. versionchanged:: 1.6
 
       Added ``ref.footnote``
+
+   .. versionchanged:: 2.1
+
+      Added ``autosectionlabel.*``
 
 .. confval:: needs_sphinx
 
@@ -492,6 +497,17 @@ General configuration
       direct usage of :program:`sphinx-build` as it caches
       (in its default usage) the parsed source files in per builder locations.
 
+   .. hint:: An alternative way to effectively deactivate (or customize) the
+      smart quotes for a given builder, for example ``latex``, is to use
+      ``make`` this way:
+
+      .. code-block:: console
+
+         make latex O="-D smartquotes_action="
+
+      This can follow some ``make html`` with no problem, in contrast to the
+      situation from the prior note.  It requires Docutils 0.14 or later.
+
    .. versionadded:: 1.6.6
 
 .. confval:: tls_verify
@@ -508,6 +524,13 @@ General configuration
    The certificates are used to verify server certifications.
 
    .. versionadded:: 1.5
+
+   .. tip:: Sphinx uses requests_ as a HTTP library internally.
+            Therefore, Sphinx refers a certification file on the
+            directory pointed ``REQUESTS_CA_BUNDLE`` environment
+            variable if ``tls_cacerts`` not set.
+
+            .. _requests: http://docs.python-requests.org/en/master/
 
 .. confval:: today
              today_fmt
@@ -1331,6 +1354,12 @@ that use Sphinx's HTMLWriter class.
 
    .. versionadded:: 1.6
 
+   .. deprecated:: 2.0
+
+.. confval:: html4_writer
+
+   Output is processed with HTML4 writer.  Default is ``False``.
+
 Options for Single HTML output
 -------------------------------
 
@@ -1561,7 +1590,11 @@ the `Dublin Core metadata <http://dublincore.org/>`_.
 .. confval:: epub_title
 
    The title of the document.  It defaults to the :confval:`html_title` option
-   but can be set independently for epub creation.
+   but can be set independently for epub creation.  It defaults to the
+   :confval:`project` option.
+
+   .. versionchanged:: 2.0
+      It defaults to the ``project`` option.
 
 .. confval:: epub_description
 

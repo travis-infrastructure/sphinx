@@ -24,10 +24,14 @@ if False:
 
 logger = logging.getLogger(__name__)
 
-if False:
-    # For type annotation
-    from typing import Any, Dict  # NOQA
-    from sphinx.application import Sphinx  # NOQA
+
+def get_node_depth(node):
+    i = 0
+    cur_node = node
+    while cur_node.parent != node.document:
+        cur_node = cur_node.parent
+        i += 1
+    return i
 
 
 def register_sections_as_label(app, document):
@@ -35,6 +39,9 @@ def register_sections_as_label(app, document):
     labels = app.env.domaindata['std']['labels']
     anonlabels = app.env.domaindata['std']['anonlabels']
     for node in document.traverse(nodes.section):
+        if (app.config.autosectionlabel_maxdepth and
+                get_node_depth(node) >= app.config.autosectionlabel_maxdepth):
+            continue
         labelid = node['ids'][0]
         docname = app.env.docname
         title = cast(nodes.title, node[0])
@@ -48,7 +55,7 @@ def register_sections_as_label(app, document):
         if name in labels:
             logger.warning(__('duplicate label %s, other instance in %s'),
                            name, app.env.doc2path(labels[name][0]),
-                           location=node)
+                           location=node, type='autosectionlabel', subtype=docname)
 
         anonlabels[name] = docname, labelid
         labels[name] = docname, labelid, sectname
@@ -57,6 +64,7 @@ def register_sections_as_label(app, document):
 def setup(app):
     # type: (Sphinx) -> Dict[str, Any]
     app.add_config_value('autosectionlabel_prefix_document', False, 'env')
+    app.add_config_value('autosectionlabel_maxdepth', None, 'env')
     app.connect('doctree-read', register_sections_as_label)
 
     return {

@@ -9,7 +9,6 @@
 """
 
 import re
-import sys
 
 import pytest
 
@@ -17,6 +16,7 @@ import sphinx.domains.cpp as cppDomain
 from sphinx import addnodes
 from sphinx.domains.cpp import DefinitionParser, DefinitionError, NoOldIdError
 from sphinx.domains.cpp import Symbol, _max_id, _id_prefix
+from sphinx.util import docutils
 
 
 def parse(name, string):
@@ -114,7 +114,7 @@ def test_expressions():
     exprCheck('nullptr', 'LDnE')
     exprCheck('true', 'L1E')
     exprCheck('false', 'L0E')
-    ints = ['5', '0', '075', '0xF', '0XF', '0b1', '0B1']
+    ints = ['5', '0', '075', '0x0123456789ABCDEF', '0XF', '0b1', '0B1']
     unsignedSuffix = ['', 'u', 'U']
     longSuffix = ['', 'l', 'L', 'll', 'LL']
     for i in ints:
@@ -129,14 +129,14 @@ def test_expressions():
                 '5e42', '5e+42', '5e-42',
                 '5.', '5.e42', '5.e+42', '5.e-42',
                 '.5', '.5e42', '.5e+42', '.5e-42',
-                '5.0', '5.0e42','5.0e+42', '5.0e-42']:
+                '5.0', '5.0e42', '5.0e+42', '5.0e-42']:
             expr = e + suffix
             exprCheck(expr, 'L' + expr + 'E')
         for e in [
                 'ApF', 'Ap+F', 'Ap-F',
                 'A.', 'A.pF', 'A.p+F', 'A.p-F',
                 '.A', '.ApF', '.Ap+F', '.Ap-F',
-                'A.B', 'A.BpF','A.Bp+F', 'A.Bp-F']:
+                'A.B', 'A.BpF', 'A.Bp+F', 'A.Bp-F']:
             expr = "0x" + e + suffix
             exprCheck(expr, 'L' + expr + 'E')
     exprCheck('"abc\\"cba"', 'LA8_KcE')  # string
@@ -151,9 +151,8 @@ def test_expressions():
         exprCheck(p + "'\\x0A'", t + "10")
         exprCheck(p + "'\\u0a42'", t + "2626")
         exprCheck(p + "'\\u0A42'", t + "2626")
-        if sys.maxunicode > 65535:
-            exprCheck(p + "'\\U0001f34c'", t + "127820")
-            exprCheck(p + "'\\U0001F34C'", t + "127820")
+        exprCheck(p + "'\\U0001f34c'", t + "127820")
+        exprCheck(p + "'\\U0001F34C'", t + "127820")
 
     # TODO: user-defined lit
     exprCheck('(... + Ns)', '(... + Ns)', id4='flpl2Ns')
@@ -195,6 +194,8 @@ def test_expressions():
     exprCheck('new int()', 'nw_ipiE')
     exprCheck('new int(5, 42)', 'nw_ipiL5EL42EE')
     exprCheck('::new int', 'nw_iE')
+    exprCheck('new int{}', 'nw_iilE')
+    exprCheck('new int{5, 42}', 'nw_iilL5EL42EE')
     # delete-expression
     exprCheck('delete p', 'dl1p')
     exprCheck('delete [] p', 'da1p')
@@ -674,6 +675,40 @@ def test_template_args():
           {2: "I0E21enable_if_not_array_t"})
 
 
+def test_initializers():
+    idsMember = {1: 'v__T', 2: '1v'}
+    idsFunction = {1: 'f__T', 2: '1f1T'}
+    idsTemplate = {2: 'I_1TE1fv', 4: 'I_1TE1fvv'}
+    # no init
+    check('member', 'T v', idsMember)
+    check('function', 'void f(T v)', idsFunction)
+    check('function', 'template<T v> void f()', idsTemplate)
+    # with '=', assignment-expression
+    check('member', 'T v = 42', idsMember)
+    check('function', 'void f(T v = 42)', idsFunction)
+    check('function', 'template<T v = 42> void f()', idsTemplate)
+    # with '=', braced-init
+    check('member', 'T v = {}', idsMember)
+    check('function', 'void f(T v = {})', idsFunction)
+    check('function', 'template<T v = {}> void f()', idsTemplate)
+    check('member', 'T v = {42, 42, 42}', idsMember)
+    check('function', 'void f(T v = {42, 42, 42})', idsFunction)
+    check('function', 'template<T v = {42, 42, 42}> void f()', idsTemplate)
+    check('member', 'T v = {42, 42, 42,}', idsMember)
+    check('function', 'void f(T v = {42, 42, 42,})', idsFunction)
+    check('function', 'template<T v = {42, 42, 42,}> void f()', idsTemplate)
+    check('member', 'T v = {42, 42, args...}', idsMember)
+    check('function', 'void f(T v = {42, 42, args...})', idsFunction)
+    check('function', 'template<T v = {42, 42, args...}> void f()', idsTemplate)
+    # without '=', braced-init
+    check('member', 'T v{}', idsMember)
+    check('member', 'T v{42, 42, 42}', idsMember)
+    check('member', 'T v{42, 42, 42,}', idsMember)
+    check('member', 'T v{42, 42, args...}', idsMember)
+    # other
+    check('member', 'T v = T{}', idsMember)
+
+
 def test_attributes():
     # style: C++
     check('member', '[[]] int f', {1: 'f__i', 2: '1f'})
@@ -713,11 +748,25 @@ def test_attributes():
           {1: 'f', 2: '1fv'},
           output='[[attr1]] [[attr2]] void f()')
     # position: declarator
-    check('member', 'int *[[attr]] i', {1: 'i__iP', 2:'1i'})
+    check('member', 'int *[[attr]] i', {1: 'i__iP', 2: '1i'})
     check('member', 'int *const [[attr]] volatile i', {1: 'i__iPVC', 2: '1i'},
           output='int *[[attr]] volatile const i')
     check('member', 'int &[[attr]] i', {1: 'i__iR', 2: '1i'})
     check('member', 'int *[[attr]] *i', {1: 'i__iPP', 2: '1i'})
+
+
+def test_xref_parsing():
+    def check(target):
+        class Config:
+            cpp_id_attributes = ["id_attr"]
+            cpp_paren_attributes = ["paren_attr"]
+        parser = DefinitionParser(target, None, Config())
+        ast, isShorthand = parser.parse_xref_object()
+        parser.assert_end()
+    check('f')
+    check('f()')
+    check('void f()')
+    check('T f()')
 
 
 # def test_print():
@@ -734,12 +783,14 @@ def test_build_domain_cpp_misuse_of_roles(app, status, warning):
     # TODO: properly check for the warnings we expect
 
 
+@pytest.mark.skipif(docutils.__version_info__ < (0, 13),
+                    reason='docutils-0.13 or above is required')
 @pytest.mark.sphinx(testroot='domain-cpp', confoverrides={'add_function_parentheses': True})
 def test_build_domain_cpp_with_add_function_parentheses_is_True(app, status, warning):
     app.builder.build_all()
 
     def check(spec, text, file):
-        pattern = '<li>%s<a .*?><code .*?><span .*?>%s</span></code></a></li>' % spec
+        pattern = '<li><p>%s<a .*?><code .*?><span .*?>%s</span></code></a></p></li>' % spec
         res = re.search(pattern, text)
         if not res:
             print("Pattern\n\t%s\nnot found in %s" % (pattern, file))
@@ -775,13 +826,14 @@ def test_build_domain_cpp_with_add_function_parentheses_is_True(app, status, war
         check(s, t, f)
 
 
-@pytest.mark.sphinx(testroot='domain-cpp', confoverrides={
-    'add_function_parentheses': False})
+@pytest.mark.skipif(docutils.__version_info__ < (0, 13),
+                    reason='docutils-0.13 or above is required')
+@pytest.mark.sphinx(testroot='domain-cpp', confoverrides={'add_function_parentheses': False})
 def test_build_domain_cpp_with_add_function_parentheses_is_False(app, status, warning):
     app.builder.build_all()
 
     def check(spec, text, file):
-        pattern = '<li>%s<a .*?><code .*?><span .*?>%s</span></code></a></li>' % spec
+        pattern = '<li><p>%s<a .*?><code .*?><span .*?>%s</span></code></a></p></li>' % spec
         res = re.search(pattern, text)
         if not res:
             print("Pattern\n\t%s\nnot found in %s" % (pattern, file))

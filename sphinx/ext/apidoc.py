@@ -19,15 +19,18 @@ import glob
 import locale
 import os
 import sys
+import warnings
 from fnmatch import fnmatch
 from os import path
 
 import sphinx.locale
 from sphinx import __display_version__, package_dir
 from sphinx.cmd.quickstart import EXTENSIONS
+from sphinx.deprecation import RemovedInSphinx40Warning
 from sphinx.locale import __
 from sphinx.util import rst
 from sphinx.util.osutil import FileAvoidWrite, ensuredir
+from sphinx.util.template import ReSTRenderer
 
 if False:
     # For type annotation
@@ -45,12 +48,16 @@ else:
     ]
 
 INITPY = '__init__.py'
-PY_SUFFIXES = set(['.py', '.pyx'])
+PY_SUFFIXES = {'.py', '.pyx'}
+
+template_dir = path.join(package_dir, 'templates', 'apidoc')
 
 
 def makename(package, module):
     # type: (str, str) -> str
     """Join package and module with a dot."""
+    warnings.warn('makename() is deprecated.',
+                  RemovedInSphinx40Warning)
     # Both package and module can be None/empty.
     if package:
         name = package
@@ -59,6 +66,12 @@ def makename(package, module):
     else:
         name = module
     return name
+
+
+def module_join(*modnames):
+    # type: (*str) -> str
+    """Join module names with dots."""
+    return '.'.join(filter(None, modnames))
 
 
 def write_file(name, text, opts):
@@ -79,6 +92,8 @@ def write_file(name, text, opts):
 def format_heading(level, text, escape=True):
     # type: (int, str, bool) -> str
     """Create a heading of <level> [1, 2 or 3 supported]."""
+    warnings.warn('format_warning() is deprecated.',
+                  RemovedInSphinx40Warning)
     if escape:
         text = rst.escape(text)
     underlining = ['=', '-', '~', ][level - 1] * len(text)
@@ -88,100 +103,81 @@ def format_heading(level, text, escape=True):
 def format_directive(module, package=None):
     # type: (str, str) -> str
     """Create the automodule directive and add the options."""
-    directive = '.. automodule:: %s\n' % makename(package, module)
+    warnings.warn('format_directive() is deprecated.',
+                  RemovedInSphinx40Warning)
+    directive = '.. automodule:: %s\n' % module_join(package, module)
     for option in OPTIONS:
         directive += '    :%s:\n' % option
     return directive
 
 
-def create_module_file(package, module, opts):
-    # type: (str, str, Any) -> None
+def create_module_file(package, basename, opts, user_template_dir=None):
+    # type: (str, str, Any, str) -> None
     """Build the text of the file and write the file."""
-    if not opts.noheadings:
-        text = format_heading(1, '%s module' % module)
-    else:
-        text = ''
-    # text += format_heading(2, ':mod:`%s` Module' % module)
-    text += format_directive(module, package)
-    write_file(makename(package, module), text, opts)
+    qualname = module_join(package, basename)
+    context = {
+        'show_headings': not opts.noheadings,
+        'basename': basename,
+        'qualname': qualname,
+        'automodule_options': OPTIONS,
+    }
+    text = ReSTRenderer([user_template_dir, template_dir]).render('module.rst_t', context)
+    write_file(qualname, text, opts)
 
 
-def create_package_file(root, master_package, subroot, py_files, opts, subs, is_namespace, excludes=[]):  # NOQA
-    # type: (str, str, str, List[str], Any, List[str], bool, List[str]) -> None
+def create_package_file(root, master_package, subroot, py_files, opts, subs,
+                        is_namespace, excludes=[], user_template_dir=None):
+    # type: (str, str, str, List[str], Any, List[str], bool, List[str], str) -> None
     """Build the text of the file and write the file."""
-    text = format_heading(1, ('%s package' if not is_namespace else "%s namespace")
-                          % makename(master_package, subroot))
+    # build a list of sub packages (directories containing an INITPY file)
+    subpackages = [sub for sub in subs if not
+                   shall_skip(path.join(root, sub, INITPY), opts, excludes)]
+    subpackages = [module_join(master_package, subroot, pkgname)
+                   for pkgname in subpackages]
+    # build a list of sub modules
+    submodules = [path.splitext(sub)[0] for sub in py_files
+                  if not is_skipped_module(path.join(root, sub), opts, excludes) and
+                  sub != INITPY]
+    submodules = [module_join(master_package, subroot, modname)
+                  for modname in submodules]
 
-    if opts.modulefirst and not is_namespace:
-        text += format_directive(subroot, master_package)
-        text += '\n'
+    pkgname = module_join(master_package, subroot)
+    context = {
+        'pkgname': pkgname,
+        'subpackages': subpackages,
+        'submodules': submodules,
+        'is_namespace': is_namespace,
+        'modulefirst': opts.modulefirst,
+        'separatemodules': opts.separatemodules,
+        'automodule_options': OPTIONS,
+        'show_headings': not opts.noheadings,
+    }
+    text = ReSTRenderer([user_template_dir, template_dir]).render('package.rst_t', context)
+    write_file(pkgname, text, opts)
 
-    # build a list of directories that are szvpackages (contain an INITPY file)
-    # and also checks the INITPY file is not empty, or there are other python
-    # source files in that folder.
-    # (depending on settings - but shall_skip() takes care of that)
-    subs = [sub for sub in subs if not
-            shall_skip(path.join(root, sub, INITPY), opts, excludes)]
-    # if there are some package directories, add a TOC for theses subpackages
-    if subs:
-        text += format_heading(2, 'Subpackages')
-        text += '.. toctree::\n\n'
-        for sub in subs:
-            text += '    %s.%s\n' % (makename(master_package, subroot), sub)
-        text += '\n'
-
-    submods = [path.splitext(sub)[0] for sub in py_files
-               if not shall_skip(path.join(root, sub), opts, excludes) and
-               sub != INITPY]
-    if submods:
-        text += format_heading(2, 'Submodules')
-        if opts.separatemodules:
-            text += '.. toctree::\n\n'
-            for submod in submods:
-                modfile = makename(master_package, makename(subroot, submod))
-                text += '   %s\n' % modfile
-
-                # generate separate file for this module
-                if not opts.noheadings:
-                    filetext = format_heading(1, '%s module' % modfile)
-                else:
-                    filetext = ''
-                filetext += format_directive(makename(subroot, submod),
-                                             master_package)
-                write_file(modfile, filetext, opts)
-        else:
-            for submod in submods:
-                modfile = makename(master_package, makename(subroot, submod))
-                if not opts.noheadings:
-                    text += format_heading(2, '%s module' % modfile)
-                text += format_directive(makename(subroot, submod),
-                                         master_package)
-                text += '\n'
-        text += '\n'
-
-    if not opts.modulefirst and not is_namespace:
-        text += format_heading(2, 'Module contents')
-        text += format_directive(subroot, master_package)
-
-    write_file(makename(master_package, subroot), text, opts)
+    if submodules and opts.separatemodules:
+        for submodule in submodules:
+            create_module_file(None, submodule, opts, user_template_dir)
 
 
-def create_modules_toc_file(modules, opts, name='modules'):
-    # type: (List[str], Any, str) -> None
+def create_modules_toc_file(modules, opts, name='modules', user_template_dir=None):
+    # type: (List[str], Any, str, str) -> None
     """Create the module's index."""
-    text = format_heading(1, '%s' % opts.header, escape=False)
-    text += '.. toctree::\n'
-    text += '   :maxdepth: %s\n\n' % opts.maxdepth
-
     modules.sort()
     prev_module = ''
-    for module in modules:
+    for module in modules[:]:
         # look if the module is a subpackage and, if yes, ignore it
         if module.startswith(prev_module + '.'):
-            continue
-        prev_module = module
-        text += '   %s\n' % module
+            modules.remove(module)
+        else:
+            prev_module = module
 
+    context = {
+        'header': opts.header,
+        'maxdepth': opts.maxdepth,
+        'docnames': modules,
+    }
+    text = ReSTRenderer([user_template_dir, template_dir]).render('toc.rst_t', context)
     write_file(name, text, opts)
 
 
@@ -212,8 +208,21 @@ def shall_skip(module, opts, excludes=[]):
     return False
 
 
-def recurse_tree(rootpath, excludes, opts):
-    # type: (str, List[str], Any) -> List[str]
+def is_skipped_module(filename, opts, excludes):
+    # type: (str, Any, List[str]) -> bool
+    """Check if we want to skip this module."""
+    if not path.exists(filename):
+        # skip if the file doesn't exist
+        return True
+    elif path.basename(filename).startswith('_') and not opts.includeprivate:
+        # skip if the module has a "private" name
+        return True
+    else:
+        return False
+
+
+def recurse_tree(rootpath, excludes, opts, user_template_dir=None):
+    # type: (str, List[str], Any, str) -> List[str]
     """
     Look for every file in the directory tree and create the corresponding
     ReST files.
@@ -263,15 +272,16 @@ def recurse_tree(rootpath, excludes, opts):
                 # a namespace and there is something there to document
                 if not is_namespace or len(py_files) > 0:
                     create_package_file(root, root_package, subpackage,
-                                        py_files, opts, subs, is_namespace, excludes)
-                    toplevels.append(makename(root_package, subpackage))
+                                        py_files, opts, subs, is_namespace, excludes,
+                                        user_template_dir)
+                    toplevels.append(module_join(root_package, subpackage))
         else:
             # if we are at the root level, we don't require it to be a package
             assert root == rootpath and root_package is None
             for py_file in py_files:
-                if not shall_skip(path.join(rootpath, py_file), opts):
+                if not is_skipped_module(path.join(rootpath, py_file), opts, excludes):
                     module = path.splitext(py_file)[0]
-                    create_module_file(root_package, module, opts)
+                    create_module_file(root_package, module, opts, user_template_dir)
                     toplevels.append(module)
 
     return toplevels
@@ -378,6 +388,11 @@ Note: By default this script will not overwrite already created files."""))
                            const='sphinx.ext.%s' % ext, dest='extensions',
                            help=__('enable %s extension') % ext)
 
+    group = parser.add_argument_group(__('Project templating'))
+    group.add_argument('-t', '--templatedir', metavar='TEMPLATEDIR',
+                       dest='templatedir',
+                       help=__('template directory for template files'))
+
     return parser
 
 
@@ -404,7 +419,7 @@ def main(argv=sys.argv[1:]):
     if not args.dryrun:
         ensuredir(args.destdir)
     excludes = [path.abspath(exclude) for exclude in args.exclude_pattern]
-    modules = recurse_tree(rootpath, excludes, args)
+    modules = recurse_tree(rootpath, excludes, args, args.templatedir)
 
     if args.full:
         from sphinx.cmd import quickstart as qs
@@ -447,9 +462,10 @@ def main(argv=sys.argv[1:]):
                 d['extensions'].extend(ext.split(','))
 
         if not args.dryrun:
-            qs.generate(d, silent=True, overwrite=args.force)
+            qs.generate(d, silent=True, overwrite=args.force,
+                        templatedir=args.templatedir)
     elif args.tocfile:
-        create_modules_toc_file(modules, args, args.tocfile)
+        create_modules_toc_file(modules, args, args.tocfile, args.templatedir)
 
     return 0
 

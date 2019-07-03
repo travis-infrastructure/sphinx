@@ -10,7 +10,6 @@
 
 import os
 import posixpath
-import sys
 import warnings
 from typing import Iterable, cast
 
@@ -19,7 +18,7 @@ from docutils.writers.html5_polyglot import HTMLTranslator as BaseTranslator
 
 from sphinx import addnodes
 from sphinx.builders import Builder
-from sphinx.deprecation import RemovedInSphinx30Warning, RemovedInSphinx40Warning
+from sphinx.deprecation import RemovedInSphinx40Warning
 from sphinx.locale import admonitionlabels, _, __
 from sphinx.util import logging
 from sphinx.util.docutils import SphinxTranslator
@@ -68,6 +67,7 @@ class HTML5Translator(SphinxTranslator, BaseTranslator):
         self.param_separator = ''
         self.optional_param_level = 0
         self._table_row_index = 0
+        self._fieldlist_row_index = 0
         self.required_params_left = 0
 
     def visit_start_of_file(self, node):
@@ -116,7 +116,7 @@ class HTML5Translator(SphinxTranslator, BaseTranslator):
 
     def visit_desc_addname(self, node):
         # type: (nodes.Element) -> None
-        self.body.append(self.starttag(node, 'code', '', CLASS='descclassname'))
+        self.body.append(self.starttag(node, 'code', '', CLASS='sig-prename descclassname'))
 
     def depart_desc_addname(self, node):
         # type: (nodes.Element) -> None
@@ -140,7 +140,7 @@ class HTML5Translator(SphinxTranslator, BaseTranslator):
 
     def visit_desc_name(self, node):
         # type: (nodes.Element) -> None
-        self.body.append(self.starttag(node, 'code', '', CLASS='descname'))
+        self.body.append(self.starttag(node, 'code', '', CLASS='sig-name descname'))
 
     def depart_desc_name(self, node):
         # type: (nodes.Element) -> None
@@ -175,7 +175,7 @@ class HTML5Translator(SphinxTranslator, BaseTranslator):
         if self.optional_param_level == 0:
             self.required_params_left -= 1
         if not node.hasattr('noemph'):
-            self.body.append('<em>')
+            self.body.append('<em class="sig-param">')
 
     def depart_desc_parameter(self, node):
         # type: (nodes.Element) -> None
@@ -422,7 +422,7 @@ class HTML5Translator(SphinxTranslator, BaseTranslator):
         lang = node.get('language', 'default')
         linenos = node.get('linenos', False)
         highlight_args = node.get('highlight_args', {})
-        highlight_args['force'] = node.get('force_highlighting', False)
+        highlight_args['force'] = node.get('force', False)
         if lang is self.builder.config.highlight_language:
             # only pass highlighter options for original language
             opts = self.builder.config.highlight_options
@@ -455,9 +455,7 @@ class HTML5Translator(SphinxTranslator, BaseTranslator):
         if isinstance(node.parent, nodes.container) and node.parent.get('literal_block'):
             self.add_permalink_ref(node.parent, _('Permalink to this code'))
         elif isinstance(node.parent, nodes.figure):
-            image_nodes = node.parent.traverse(nodes.image)
-            target_node = image_nodes and image_nodes[0] or node.parent
-            self.add_permalink_ref(target_node, _('Permalink to this image'))
+            self.add_permalink_ref(node.parent, _('Permalink to this image'))
         elif node.parent.get('toctree'):
             self.add_permalink_ref(node.parent.parent, _('Permalink to this toctree'))
 
@@ -884,33 +882,3 @@ class HTML5Translator(SphinxTranslator, BaseTranslator):
     def unknown_visit(self, node):
         # type: (nodes.Node) -> None
         raise NotImplementedError('Unknown node: ' + node.__class__.__name__)
-
-    # --------- METHODS FOR COMPATIBILITY --------------------------------------
-
-    @property
-    def highlightlang(self):
-        # type: () -> str
-        warnings.warn('HTMLTranslator.highlightlang is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return self.builder.config.highlight_language
-
-    @property
-    def highlightlang_base(self):
-        # type: () -> str
-        warnings.warn('HTMLTranslator.highlightlang_base is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return self.builder.config.highlight_language
-
-    @property
-    def highlightopts(self):
-        # type: () -> str
-        warnings.warn('HTMLTranslator.highlightopts is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return self.builder.config.highlight_options
-
-    @property
-    def highlightlinenothreshold(self):
-        # type: () -> int
-        warnings.warn('HTMLTranslator.highlightlinenothreshold is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
-        return sys.maxsize

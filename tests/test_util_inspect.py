@@ -7,9 +7,12 @@
     :copyright: Copyright 2007-2019 by the Sphinx team, see AUTHORS.
     :license: BSD, see LICENSE for details.
 """
+
+import _testcapi
+import datetime
 import functools
 import sys
-from textwrap import dedent
+import types
 
 import pytest
 
@@ -192,7 +195,7 @@ def test_Signature_partialmethod():
 
 def test_Signature_annotations():
     from typing_test_data import (f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10,
-                                  f11, f12, f13, f14, f15, f16, f17, Node)
+                                  f11, f12, f13, f14, f15, f16, f17, f18, Node)
 
     # Class annotations
     sig = inspect.Signature(f0).format_args()
@@ -268,6 +271,9 @@ def test_Signature_annotations():
     # keyword only arguments (2)
     sig = inspect.Signature(f17).format_args()
     assert sig == '(*, arg3, arg4)'
+
+    sig = inspect.Signature(f18).format_args()
+    assert sig == '(self, arg1: Union[int, Tuple] = 10) -> List[Dict]'
 
     # type hints by string
     sig = inspect.Signature(Node.children).format_args()
@@ -352,7 +358,7 @@ def test_set_sorting():
 
 
 def test_set_sorting_fallback():
-    set_ = set((None, 1))
+    set_ = {None, 1}
     description = inspect.object_description(set_)
     assert description in ("{1, None}", "{None, 1}")
 
@@ -383,19 +389,102 @@ def test_dict_customtype():
     assert "<CustomType(2)>: 2" in description
 
 
-def test_isstaticmethod():
-    class Foo():
-        @staticmethod
-        def method1():
+@pytest.mark.sphinx(testroot='ext-autodoc')
+def test_isstaticmethod(app):
+    from target.methods import Base, Inherited
+
+    assert inspect.isstaticmethod(Base.staticmeth, Base, 'staticmeth') is True
+    assert inspect.isstaticmethod(Base.meth, Base, 'meth') is False
+    assert inspect.isstaticmethod(Inherited.staticmeth, Inherited, 'staticmeth') is True
+    assert inspect.isstaticmethod(Inherited.meth, Inherited, 'meth') is False
+
+
+@pytest.mark.sphinx(testroot='ext-autodoc')
+def test_iscoroutinefunction(app):
+    from target.functions import coroutinefunc, func, partial_coroutinefunc
+    from target.methods import Base
+
+    assert inspect.iscoroutinefunction(func) is False                   # function
+    assert inspect.iscoroutinefunction(coroutinefunc) is True           # coroutine
+    assert inspect.iscoroutinefunction(partial_coroutinefunc) is True   # partial-ed coroutine
+    assert inspect.iscoroutinefunction(Base.meth) is False              # method
+    assert inspect.iscoroutinefunction(Base.coroutinemeth) is True      # coroutine-method
+
+    # partial-ed coroutine-method
+    partial_coroutinemeth = Base.__dict__['partial_coroutinemeth']
+    assert inspect.iscoroutinefunction(partial_coroutinemeth) is True
+
+
+@pytest.mark.sphinx(testroot='ext-autodoc')
+def test_isfunction(app):
+    from target.functions import builtin_func, partial_builtin_func
+    from target.functions import func, partial_func
+    from target.methods import Base
+
+    assert inspect.isfunction(func) is True                     # function
+    assert inspect.isfunction(partial_func) is True             # partial-ed function
+    assert inspect.isfunction(Base.meth) is True                # method of class
+    assert inspect.isfunction(Base.partialmeth) is True         # partial-ed method of class
+    assert inspect.isfunction(Base().meth) is False             # method of instance
+    assert inspect.isfunction(builtin_func) is False            # builtin function
+    assert inspect.isfunction(partial_builtin_func) is False    # partial-ed builtin function
+
+
+@pytest.mark.sphinx(testroot='ext-autodoc')
+def test_isbuiltin(app):
+    from target.functions import builtin_func, partial_builtin_func
+    from target.functions import func, partial_func
+    from target.methods import Base
+
+    assert inspect.isbuiltin(builtin_func) is True          # builtin function
+    assert inspect.isbuiltin(partial_builtin_func) is True  # partial-ed builtin function
+    assert inspect.isbuiltin(func) is False                 # function
+    assert inspect.isbuiltin(partial_func) is False         # partial-ed function
+    assert inspect.isbuiltin(Base.meth) is False            # method of class
+    assert inspect.isbuiltin(Base().meth) is False          # method of instance
+
+
+@pytest.mark.sphinx(testroot='ext-autodoc')
+def test_isdescriptor(app):
+    from target.functions import func
+    from target.methods import Base
+
+    assert inspect.isdescriptor(Base.prop) is True      # property of class
+    assert inspect.isdescriptor(Base().prop) is False   # property of instance
+    assert inspect.isdescriptor(Base.meth) is True      # method of class
+    assert inspect.isdescriptor(Base().meth) is True    # method of instance
+    assert inspect.isdescriptor(func) is True           # function
+
+
+@pytest.mark.sphinx(testroot='ext-autodoc')
+def test_isattributedescriptor(app):
+    from target.methods import Base
+
+    class Descriptor:
+        def __get__(self, obj, typ=None):
             pass
 
-        def method2(self):
-            pass
+    testinstancemethod = _testcapi.instancemethod(str.__repr__)
 
-    class Bar(Foo):
-        pass
+    assert inspect.isattributedescriptor(Base.prop) is True                    # property
+    assert inspect.isattributedescriptor(Base.meth) is False                   # method
+    assert inspect.isattributedescriptor(Base.staticmeth) is False             # staticmethod
+    assert inspect.isattributedescriptor(Base.classmeth) is False              # classmetho
+    assert inspect.isattributedescriptor(Descriptor) is False                  # custom descriptor class    # NOQA
+    assert inspect.isattributedescriptor(str.join) is False                    # MethodDescriptorType       # NOQA
+    assert inspect.isattributedescriptor(object.__init__) is False             # WrapperDescriptorType      # NOQA
+    assert inspect.isattributedescriptor(dict.__dict__['fromkeys']) is False   # ClassMethodDescriptorType  # NOQA
+    assert inspect.isattributedescriptor(types.FrameType.f_locals) is True     # GetSetDescriptorType       # NOQA
+    assert inspect.isattributedescriptor(datetime.timedelta.days) is True      # MemberDescriptorType       # NOQA
+    assert inspect.isattributedescriptor(testinstancemethod) is False          # instancemethod (C-API)     # NOQA
 
-    assert inspect.isstaticmethod(Foo.method1, Foo, 'method1') is True
-    assert inspect.isstaticmethod(Foo.method2, Foo, 'method2') is False
-    assert inspect.isstaticmethod(Bar.method1, Bar, 'method1') is True
-    assert inspect.isstaticmethod(Bar.method2, Bar, 'method2') is False
+
+def test_isproperty(app):
+    from target.functions import func
+    from target.methods import Base
+
+    assert inspect.isproperty(Base.prop) is True        # property of class
+    assert inspect.isproperty(Base().prop) is False     # property of instance
+    assert inspect.isproperty(Base.meth) is False       # method of class
+    assert inspect.isproperty(Base().meth) is False     # method of instance
+    assert inspect.isproperty(func) is False            # function

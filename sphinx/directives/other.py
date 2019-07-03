@@ -7,9 +7,11 @@
 """
 
 import re
+from typing import Any, Dict, List
 from typing import cast
 
 from docutils import nodes
+from docutils.nodes import Element, Node
 from docutils.parsers.rst import directives
 from docutils.parsers.rst.directives.admonitions import BaseAdmonition
 from docutils.parsers.rst.directives.misc import Class
@@ -21,20 +23,17 @@ from sphinx.locale import _
 from sphinx.util import url_re, docname_join
 from sphinx.util.docutils import SphinxDirective
 from sphinx.util.matching import Matcher, patfilter
-from sphinx.util.nodes import explicit_title_re, set_source_info, \
-    process_index_entry
+from sphinx.util.nodes import explicit_title_re, process_index_entry
 
 if False:
     # For type annotation
-    from typing import Any, Dict, Generator, List, Tuple  # NOQA
-    from sphinx.application import Sphinx  # NOQA
+    from sphinx.application import Sphinx
 
 
 glob_re = re.compile(r'.*[*?\[].*')
 
 
-def int_or_nothing(argument):
-    # type: (str) -> int
+def int_or_nothing(argument: str) -> int:
     if not argument:
         return 999
     return int(argument)
@@ -61,8 +60,7 @@ class TocTree(SphinxDirective):
         'reversed': directives.flag,
     }
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         subnode = addnodes.toctree()
         subnode['parent'] = self.env.docname
 
@@ -77,7 +75,7 @@ class TocTree(SphinxDirective):
         subnode['includehidden'] = 'includehidden' in self.options
         subnode['numbered'] = self.options.get('numbered', 0)
         subnode['titlesonly'] = 'titlesonly' in self.options
-        set_source_info(self, subnode)
+        self.set_source_info(subnode)
         wrappernode = nodes.compound(classes=['toctree-wrapper'])
         wrappernode.append(subnode)
         self.add_name(wrappernode)
@@ -161,11 +159,10 @@ class Author(SphinxDirective):
     final_argument_whitespace = True
     option_spec = {}  # type: Dict
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         if not self.config.show_authors:
             return []
-        para = nodes.paragraph(translatable=False)  # type: nodes.Element
+        para = nodes.paragraph(translatable=False)  # type: Element
         emph = nodes.emphasis()
         para += emph
         if self.name == 'sectionauthor':
@@ -180,7 +177,7 @@ class Author(SphinxDirective):
         inodes, messages = self.state.inline_text(self.arguments[0], self.lineno)
         emph.extend(inodes)
 
-        ret = [para]  # type: List[nodes.Node]
+        ret = [para]  # type: List[Node]
         ret += messages
         return ret
 
@@ -195,8 +192,7 @@ class Index(SphinxDirective):
     final_argument_whitespace = True
     option_spec = {}  # type: Dict
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         arguments = self.arguments[0].split('\n')
         targetid = 'index-%s' % self.env.new_serialno('index')
         targetnode = nodes.target('', '', ids=[targetid])
@@ -204,7 +200,7 @@ class Index(SphinxDirective):
         indexnode = addnodes.index()
         indexnode['entries'] = []
         indexnode['inline'] = False
-        set_source_info(self, indexnode)
+        self.set_source_info(indexnode)
         for entry in arguments:
             indexnode['entries'].extend(process_index_entry(entry, targetid))
         return [indexnode, targetnode]
@@ -227,11 +223,10 @@ class TabularColumns(SphinxDirective):
     final_argument_whitespace = True
     option_spec = {}  # type: Dict
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         node = addnodes.tabular_col_spec()
         node['spec'] = self.arguments[0]
-        set_source_info(self, node)
+        self.set_source_info(node)
         return [node]
 
 
@@ -245,15 +240,14 @@ class Centered(SphinxDirective):
     final_argument_whitespace = True
     option_spec = {}  # type: Dict
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         if not self.arguments:
             return []
-        subnode = addnodes.centered()  # type: nodes.Element
+        subnode = addnodes.centered()  # type: Element
         inodes, messages = self.state.inline_text(self.arguments[0], self.lineno)
         subnode.extend(inodes)
 
-        ret = [subnode]  # type: List[nodes.Node]
+        ret = [subnode]  # type: List[Node]
         ret += messages
         return ret
 
@@ -268,8 +262,7 @@ class Acks(SphinxDirective):
     final_argument_whitespace = False
     option_spec = {}  # type: Dict
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         node = addnodes.acks()
         node.document = self.state.document
         self.state.nested_parse(self.content, self.content_offset, node)
@@ -292,8 +285,7 @@ class HList(SphinxDirective):
         'columns': int,
     }
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         ncolumns = self.options.get('columns', 2)
         node = nodes.paragraph()
         node.document = self.state.document
@@ -326,11 +318,10 @@ class Only(SphinxDirective):
     final_argument_whitespace = True
     option_spec = {}  # type: Dict
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         node = addnodes.only()
         node.document = self.state.document
-        set_source_info(self, node)
+        self.set_source_info(node)
         node['expr'] = self.arguments[0]
 
         # Same as util.nested_parse_with_titles but try to handle nested
@@ -381,8 +372,7 @@ class Include(BaseInclude, SphinxDirective):
     "correctly", i.e. relative to source directory.
     """
 
-    def run(self):
-        # type: () -> List[nodes.Node]
+    def run(self) -> List[Node]:
         if self.arguments[0].startswith('<') and \
            self.arguments[0].endswith('>'):
             # docutils "standard" includes, do not do path processing
@@ -393,8 +383,7 @@ class Include(BaseInclude, SphinxDirective):
         return super().run()
 
 
-def setup(app):
-    # type: (Sphinx) -> Dict[str, Any]
+def setup(app: "Sphinx") -> Dict[str, Any]:
     directives.register_directive('toctree', TocTree)
     directives.register_directive('sectionauthor', Author)
     directives.register_directive('moduleauthor', Author)

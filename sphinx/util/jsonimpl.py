@@ -9,39 +9,38 @@
 """
 
 import json
+import warnings
 from collections import UserString
+from typing import Any, IO
 
-if False:
-    # For type annotation
-    from typing import Any, IO  # NOQA
+from sphinx.deprecation import RemovedInSphinx40Warning
+
+
+warnings.warn('sphinx.util.jsonimpl is deprecated',
+              RemovedInSphinx40Warning, stacklevel=2)
 
 
 class SphinxJSONEncoder(json.JSONEncoder):
     """JSONEncoder subclass that forces translation proxies."""
-    def default(self, obj):
-        # type: (Any) -> str
+    def default(self, obj: Any) -> str:
         if isinstance(obj, UserString):
             return str(obj)
         return super().default(obj)
 
 
-def dump(obj, fp, *args, **kwds):
-    # type: (Any, IO, Any, Any) -> None
+def dump(obj: Any, fp: IO, *args, **kwds) -> None:
     kwds['cls'] = SphinxJSONEncoder
     json.dump(obj, fp, *args, **kwds)
 
 
-def dumps(obj, *args, **kwds):
-    # type: (Any, Any, Any) -> str
+def dumps(obj: Any, *args, **kwds) -> str:
     kwds['cls'] = SphinxJSONEncoder
     return json.dumps(obj, *args, **kwds)
 
 
-def load(*args, **kwds):
-    # type: (Any, Any) -> Any
+def load(*args, **kwds) -> Any:
     return json.load(*args, **kwds)
 
 
-def loads(*args, **kwds):
-    # type: (Any, Any) -> Any
+def loads(*args, **kwds) -> Any:
     return json.loads(*args, **kwds)

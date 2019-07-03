@@ -14,17 +14,26 @@ import inspect
 import re
 import sys
 import typing
-import warnings
-from functools import partial
+from functools import partial, partialmethod
+from inspect import (  # NOQA
+    isclass, ismethod, ismethoddescriptor, isroutine
+)
 from io import StringIO
+from typing import Any, Callable, Mapping, List, Tuple
 
-from sphinx.deprecation import RemovedInSphinx30Warning
 from sphinx.util import logging
-from sphinx.util.pycompat import NoneType
+from sphinx.util.typing import NoneType
 
-if False:
-    # For type annotation
-    from typing import Any, Callable, Mapping, List, Tuple, Type  # NOQA
+if sys.version_info > (3, 7):
+    from types import (
+        ClassMethodDescriptorType,
+        MethodDescriptorType,
+        WrapperDescriptorType
+    )
+else:
+    ClassMethodDescriptorType = type(object.__init__)
+    MethodDescriptorType = type(str.join)
+    WrapperDescriptorType = type(dict.__dict__['fromkeys'])
 
 logger = logging.getLogger(__name__)
 
@@ -100,26 +109,22 @@ def getargspec(func):
                                kwonlyargs, kwdefaults, annotations)
 
 
-def isenumclass(x):
-    # type: (Type) -> bool
+def isenumclass(x: Any) -> bool:
     """Check if the object is subclass of enum."""
     return inspect.isclass(x) and issubclass(x, enum.Enum)
 
 
-def isenumattribute(x):
-    # type: (Any) -> bool
+def isenumattribute(x: Any) -> bool:
     """Check if the object is attribute of enum."""
     return isinstance(x, enum.Enum)
 
 
-def ispartial(obj):
-    # type: (Any) -> bool
+def ispartial(obj: Any) -> bool:
     """Check if the object is partial."""
-    return isinstance(obj, partial)
+    return isinstance(obj, (partial, partialmethod))
 
 
-def isclassmethod(obj):
-    # type: (Any) -> bool
+def isclassmethod(obj: Any) -> bool:
     """Check if the object is classmethod."""
     if isinstance(obj, classmethod):
         return True
@@ -129,8 +134,7 @@ def isclassmethod(obj):
     return False
 
 
-def isstaticmethod(obj, cls=None, name=None):
-    # type: (Any, Any, str) -> bool
+def isstaticmethod(obj: Any, cls: Any = None, name: str = None) -> bool:
     """Check if the object is staticmethod."""
     if isinstance(obj, staticmethod):
         return True
@@ -149,8 +153,7 @@ def isstaticmethod(obj, cls=None, name=None):
     return False
 
 
-def isdescriptor(x):
-    # type: (Any) -> bool
+def isdescriptor(x: Any) -> bool:
     """Check if the object is some kind of descriptor."""
     for item in '__get__', '__set__', '__delete__':
         if hasattr(safe_getattr(x, item, None), '__call__'):
@@ -158,20 +161,65 @@ def isdescriptor(x):
     return False
 
 
-def isfunction(obj):
-    # type: (Any) -> bool
+def isabstractmethod(obj: Any) -> bool:
+    """Check if the object is an abstractmethod."""
+    return safe_getattr(obj, '__isabstractmethod__', False) is True
+
+
+def isattributedescriptor(obj: Any) -> bool:
+    """Check if the object is an attribute like descriptor."""
+    if inspect.isdatadescriptor(object):
+        # data descriptor is kind of attribute
+        return True
+    elif isdescriptor(obj):
+        # non data descriptor
+        if isfunction(obj) or isbuiltin(obj) or inspect.ismethod(obj):
+            # attribute must not be either function, builtin and method
+            return False
+        elif inspect.isclass(obj):
+            # attribute must not be a class
+            return False
+        elif isinstance(obj, (ClassMethodDescriptorType,
+                              MethodDescriptorType,
+                              WrapperDescriptorType)):
+            # attribute must not be a method descriptor
+            return False
+        elif type(obj).__name__ == "instancemethod":
+            # attribute must not be an instancemethod (C-API)
+            return False
+        else:
+            return True
+    else:
+        return False
+
+
+def isfunction(obj: Any) -> bool:
     """Check if the object is function."""
     return inspect.isfunction(obj) or ispartial(obj) and inspect.isfunction(obj.func)
 
 
-def isbuiltin(obj):
-    # type: (Any) -> bool
+def isbuiltin(obj: Any) -> bool:
     """Check if the object is builtin."""
     return inspect.isbuiltin(obj) or ispartial(obj) and inspect.isbuiltin(obj.func)
 
 
-def safe_getattr(obj, name, *defargs):
-    # type: (Any, str, str) -> object
+def iscoroutinefunction(obj: Any) -> bool:
+    """Check if the object is coroutine-function."""
+    if inspect.iscoroutinefunction(obj):
+        return True
+    elif ispartial(obj) and inspect.iscoroutinefunction(obj.func):
+        # partialed
+        return True
+    else:
+        return False
+
+
+def isproperty(obj: Any) -> bool:
+    """Check if the object is property."""
+    return isinstance(obj, property)
+
+
+def safe_getattr(obj: Any, name: str, *defargs) -> Any:
     """A getattr() that turns all exceptions into AttributeErrors."""
     try:
         return getattr(obj, name, *defargs)
@@ -193,8 +241,8 @@ def safe_getattr(obj, name, *defargs):
         raise AttributeError(name)
 
 
-def safe_getmembers(object, predicate=None, attr_getter=safe_getattr):
-    # type: (Any, Callable[[str], bool], Callable) -> List[Tuple[str, Any]]
+def safe_getmembers(object: Any, predicate: Callable[[str], bool] = None,
+                    attr_getter: Callable = safe_getattr) -> List[Tuple[str, Any]]:
     """A version of inspect.getmembers() that uses safe_getattr()."""
     results = []  # type: List[Tuple[str, Any]]
     for key in dir(object):
@@ -208,8 +256,7 @@ def safe_getmembers(object, predicate=None, attr_getter=safe_getattr):
     return results
 
 
-def object_description(object):
-    # type: (Any) -> str
+def object_description(object: Any) -> str:
     """A repr() implementation that returns text safe to use in reST context."""
     if isinstance(object, dict):
         try:
@@ -246,8 +293,7 @@ def object_description(object):
     return s.replace('\n', ' ')
 
 
-def is_builtin_class_method(obj, attr_name):
-    # type: (Any, str) -> bool
+def is_builtin_class_method(obj: Any, attr_name: str) -> bool:
     """If attr_name is implemented at builtin class, return True.
 
         >>> is_builtin_class_method(int, '__init__')
@@ -259,29 +305,9 @@ def is_builtin_class_method(obj, attr_name):
     classes = [c for c in inspect.getmro(obj) if attr_name in c.__dict__]
     cls = classes[0] if classes else object
 
-    if not hasattr(builtins, safe_getattr(cls, '__name__', '')):  # type: ignore
+    if not hasattr(builtins, safe_getattr(cls, '__name__', '')):
         return False
-    return getattr(builtins, safe_getattr(cls, '__name__', '')) is cls  # type: ignore
-
-
-class Parameter:
-    """Fake parameter class for python2."""
-    POSITIONAL_ONLY = 0
-    POSITIONAL_OR_KEYWORD = 1
-    VAR_POSITIONAL = 2
-    KEYWORD_ONLY = 3
-    VAR_KEYWORD = 4
-    empty = object()
-
-    def __init__(self, name, kind=POSITIONAL_OR_KEYWORD, default=empty):
-        # type: (str, int, Any) -> None
-        self.name = name
-        self.kind = kind
-        self.default = default
-        self.annotation = self.empty
-
-        warnings.warn('sphinx.util.inspect.Parameter is deprecated.',
-                      RemovedInSphinx30Warning, stacklevel=2)
+    return getattr(builtins, safe_getattr(cls, '__name__', '')) is cls
 
 
 class Signature:
@@ -289,8 +315,8 @@ class Signature:
     its return annotation.
     """
 
-    def __init__(self, subject, bound_method=False, has_retval=True):
-        # type: (Callable, bool, bool) -> None
+    def __init__(self, subject: Callable, bound_method: bool = False,
+                 has_retval: bool = True) -> None:
         # check subject is not a built-in class (ex. int, str)
         if (isinstance(subject, type) and
                 is_builtin_class_method(subject, "__new__") and
@@ -335,16 +361,14 @@ class Signature:
             self.skip_first_argument = False
 
     @property
-    def parameters(self):
-        # type: () -> Mapping
+    def parameters(self) -> Mapping:
         if self.partialmethod_with_noargs:
             return {}
         else:
             return self.signature.parameters
 
     @property
-    def return_annotation(self):
-        # type: () -> Any
+    def return_annotation(self) -> Any:
         if self.signature:
             if self.has_retval:
                 return self.signature.return_annotation
@@ -353,8 +377,7 @@ class Signature:
         else:
             return None
 
-    def format_args(self):
-        # type: () -> str
+    def format_args(self, show_annotation: bool = True) -> str:
         args = []
         last_kind = None
         for i, param in enumerate(self.parameters.values()):
@@ -375,7 +398,7 @@ class Signature:
                               param.POSITIONAL_OR_KEYWORD,
                               param.KEYWORD_ONLY):
                 arg.write(param.name)
-                if param.annotation is not param.empty:
+                if show_annotation and param.annotation is not param.empty:
                     if isinstance(param.annotation, str) and param.name in self.annotations:
                         arg.write(': ')
                         arg.write(self.format_annotation(self.annotations[param.name]))
@@ -409,8 +432,7 @@ class Signature:
 
             return '(%s) -> %s' % (', '.join(args), annotation)
 
-    def format_annotation(self, annotation):
-        # type: (Any) -> str
+    def format_annotation(self, annotation: Any) -> str:
         """Return formatted representation of a type annotation.
 
         Show qualified names for types and additional details for types from
@@ -436,8 +458,7 @@ class Signature:
         else:
             return self.format_annotation_old(annotation)
 
-    def format_annotation_new(self, annotation):
-        # type: (Any) -> str
+    def format_annotation_new(self, annotation: Any) -> str:
         """format_annotation() for py37+"""
         module = getattr(annotation, '__module__', None)
         if module == 'typing':
@@ -465,14 +486,15 @@ class Signature:
                 args = ', '.join(self.format_annotation(a) for a in annotation.__args__[:-1])
                 returns = self.format_annotation(annotation.__args__[-1])
                 return '%s[[%s], %s]' % (qualname, args, returns)
+            elif annotation._special:
+                return qualname
             else:
                 args = ', '.join(self.format_annotation(a) for a in annotation.__args__)
                 return '%s[%s]' % (qualname, args)
 
         return qualname
 
-    def format_annotation_old(self, annotation):
-        # type: (Any) -> str
+    def format_annotation_old(self, annotation: Any) -> str:
         """format_annotation() for py36 or below"""
         module = getattr(annotation, '__module__', None)
         if module == 'typing':
@@ -496,8 +518,11 @@ class Signature:
                 not hasattr(annotation, '__tuple_params__')):
             # This is for Python 3.6+, 3.5 case is handled below
             params = annotation.__args__
-            param_str = ', '.join(self.format_annotation(p) for p in params)
-            return '%s[%s]' % (qualname, param_str)
+            if params:
+                param_str = ', '.join(self.format_annotation(p) for p in params)
+                return '%s[%s]' % (qualname, param_str)
+            else:
+                return qualname
         elif (hasattr(typing, 'GenericMeta') and  # for py36 or below
               isinstance(annotation, typing.GenericMeta)):
             # In Python 3.5.2+, all arguments are stored in __args__,
@@ -570,8 +595,8 @@ class Signature:
         return qualname
 
 
-def getdoc(obj, attrgetter=safe_getattr, allow_inherited=False):
-    # type: (Any, Callable, bool) -> str
+def getdoc(obj: Any, attrgetter: Callable = safe_getattr,
+           allow_inherited: bool = False) -> str:
     """Get the docstring for the object.
 
     This tries to obtain the docstring for some kind of objects additionally:
