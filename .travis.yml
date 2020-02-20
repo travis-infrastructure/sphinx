@@ -11,7 +11,7 @@ env:
 
 install:
   - brew install imagemagick
-  - pip install -U tox codecov
+  - pip3 install -U tox codecov
 
 script:
   - if [ $IS_PYTHON = true ]; then tox -- -v; fi
